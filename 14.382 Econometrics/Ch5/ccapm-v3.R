@@ -23,40 +23,42 @@ library(sandwich)
 library(gmm)
 library(quantmod)
 
-filepath="/Users/danielfisch/MIT Dropbox/Daniel Fisch/Courses/Code/14.382 Econometrics/Ch5/"
-setwd(filepath)
+# filepath="/Users/danielfisch/MIT Dropbox/Daniel Fisch/Courses/Code/14.382 Econometrics/Ch5/"
+# setwd(filepath)
 
 # Reading the data
-raw.data = as.data.frame(read.csv("ccapm-long_mert.csv", header=T ))
- attach(raw.data)
+# raw.data = as.data.frame(read.csv("ccapm-long_mert.csv", header=T ))
+#  attach(raw.data)
 
-# Preparing data
- rCpc        = PCEND/(PPCEND * CNP16OV)
- a.inflation =  PPCEND/Lag(PPCEND, k=12) - 1
+# # Preparing data
+#  rCpc        = PCEND/(PPCEND * CNP16OV)
+#  a.inflation =  PPCEND/Lag(PPCEND, k=12) - 1
 
- Rb          = (1 + GS1/100 - a.inflation)^(1/12)   #total monthly return to bonds (deflated)
- Rm          = (SP500/Lag(SP500))*(Lag(PPCEND)/PPCEND)  #total monthly return to stocks (deflated)
- Rc          = rCpc/Lag(rCpc)  #total monthly return to per-capita consumption (deflated)
- Ret=        na.omit(cbind(Rc, Rm, Rb))
- colnames(Ret) = c("Rc", "Rm", "Rb")
+#  Rb          = (1 + GS1/100 - a.inflation)^(1/12)   #total monthly return to bonds (deflated)
+#  Rm          = (SP500/Lag(SP500))*(Lag(PPCEND)/PPCEND)  #total monthly return to stocks (deflated)
+#  Rc          = rCpc/Lag(rCpc)  #total monthly return to per-capita consumption (deflated)
+#  Ret=        na.omit(cbind(Rc, Rm, Rb))
+#  colnames(Ret) = c("Rc", "Rm", "Rb")
 
-ts.plot(Ret[500:600,], main="consumption, stock, and bond total returns", col=c(1,4,3))
- detach("raw.data")
+# ts.plot(Ret[500:600,], main="consumption, stock, and bond total returns", col=c(1,4,3))
+#  detach("raw.data")
 
-pdf(file="L4/SeriesPlot.PDF", width=6, height=3)
-ts.plot(Ret[500:600,], main="consumption, stock, and bond total returns", col=c(1,4,3))
-dev.off()
+# pdf(file="L4/SeriesPlot.PDF", width=6, height=3)
+# ts.plot(Ret[500:600,], main="consumption, stock, and bond total returns", col=c(1,4,3))
+# dev.off()
 
-# Write out and Read-in Processed data
+# # Write out and Read-in Processed data
 
-write.csv(Ret,file="Data/CCAPM/ccapm-ready-to-use.csv",row.names=FALSE)
+# write.csv(Ret,file="Data/CCAPM/ccapm-ready-to-use.csv",row.names=FALSE)
 
-Ret= read.csv(file="Data/CCAPM/ccapm-long_mert.csv", header=T)
+Ret= read.csv(file="ccapm-long_mert.csv", header=T)
 attach(Ret)
 str(Ret)
 summary(Ret)
-
-
+dates = Ret[,1]
+Rc = Ret[,2]
+Rm = Ret[,3]
+Rb = Ret[,4]
 ############  Score Functions #####################
 # the score function here returns the n by m  matrix of scores to be used in gmm package; 
 # i.e., the return the m- vector of scores g(X_i, \theta) evaluated at each data point X_i
@@ -89,11 +91,15 @@ x    = na.omit(cbind(y,z))
 
 
 # GMM fit
-gmm2.fit  = summary(gmm(g2.x.theta, x, t0 = c(.99,1), method = "BFGS" ,  type="iter", vcov="iid"))
+gmm2.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
+                 method = "BFGS", type="iter", vcov="iid")
+gmm2.fit  = summary(gmm2.fit)
 print(gmm2.fit)
 
 # CUE fit
-gmm2.cue.fit  = summary(gmm(g2.x.theta, x, t0 = c(.99,.5),  type="cue",  vcov="iid"))
+gmm2.cue.fit  = gmm(g2.x.theta, x, t0 = c(.99,.5), 
+                     type="cue", vcov="iid")
+gmm2.cue.fit  = summary(gmm2.cue.fit)
 print(gmm2.cue.fit)
 
 # Estimation with Instrument = 1 lag of Consumption and Market Returns and Squares and Interactions 
@@ -106,11 +112,15 @@ x   = na.omit(cbind(y,z))
 
 
 # GMM fit
-gmm2.zsq.fit  = summary(gmm(g2.x.theta, x, t0 = c(.99,1),  vcov="iid", type="iter"))
+gmm2.zsq.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
+                     vcov="iid", type="iter")
+gmm2.zsq.fit  = summary(gmm2.zsq.fit)
 print(gmm2.zsq.fit)
 
 # CUE fit
-gmm2.zsq.cue.fit  = summary(gmm(g2.x.theta, x, t0 = c(.99,1), type="cue", vcov="iid"))
+gmm2.zsq.cue.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
+                         type="cue", vcov="iid")
+gmm2.zsq.cue.fit  = summary(gmm2.zsq.cue.fit)
 print(gmm2.zsq.cue.fit)
 
 
@@ -119,30 +129,30 @@ print(gmm2.zsq.cue.fit)
 library(xtable)  #package to generate nice latex tables
 
 
-tableJ= matrix(0, ncol=4, nrow=2)
-tableJ[,1]= gmm2.fit$stest[[2]]
-tableJ[,2]= gmm2.cue.fit$stest[[2]]
-tableJ[,3]= gmm2.zsq.fit$stest[[2]]
-tableJ[,4]= gmm2.zsq.cue.fit$stest[[2]]
-colnames(tableJ)= c("GMM-1", "CUE-1", "GMM-2", "CUE-2")
-rownames(tableJ)= c("J-statistic", "p-value")
+# tableJ= matrix(0, ncol=4, nrow=2)
+# tableJ[,1]= gmm2.fit$stest[[2]]
+# tableJ[,2]= gmm2.cue.fit$stest[[2]]
+# tableJ[,3]= gmm2.zsq.fit$stest[[2]]
+# tableJ[,4]= gmm2.zsq.cue.fit$stest[[2]]
+# colnames(tableJ)= c("GMM-1", "CUE-1", "GMM-2", "CUE-2")
+# rownames(tableJ)= c("J-statistic", "p-value")
 
-tableE= matrix(0, ncol=4, nrow=4);
-tableE[c(1:2),1]= gmm2.fit$coef[1,c(1:2)]
-tableE[c(3:4),1]= gmm2.fit$coef[2,c(1:2)]
-tableE[c(1:2),2]= gmm2.cue.fit$coef[1,c(1:2)]
-tableE[c(3:4),2]= gmm2.cue.fit$coef[2,c(1:2)]
-tableE[c(1:2),3]= gmm2.zsq.fit$coef[1,c(1:2)]
-tableE[c(3:4),3]= gmm2.zsq.fit$coef[2,c(1:2)]
-tableE[c(1:2),4]= gmm2.zsq.cue.fit$coef[1,c(1:2)]
-tableE[c(3:4),4]= gmm2.zsq.cue.fit$coef[2,c(1:2)]
+# tableE= matrix(0, ncol=4, nrow=4);
+# tableE[c(1:2),1]= gmm2.fit$coef[1,c(1:2)]
+# tableE[c(3:4),1]= gmm2.fit$coef[2,c(1:2)]
+# tableE[c(1:2),2]= gmm2.cue.fit$coef[1,c(1:2)]
+# tableE[c(3:4),2]= gmm2.cue.fit$coef[2,c(1:2)]
+# tableE[c(1:2),3]= gmm2.zsq.fit$coef[1,c(1:2)]
+# tableE[c(3:4),3]= gmm2.zsq.fit$coef[2,c(1:2)]
+# tableE[c(1:2),4]= gmm2.zsq.cue.fit$coef[1,c(1:2)]
+# tableE[c(3:4),4]= gmm2.zsq.cue.fit$coef[2,c(1:2)]
 
-colnames(tableE)= c("GMM-1", "CUE-1", "GMM-2", "CUE-2")
-rownames(tableE)= c("estimated beta", "std error beta",  "estimated alpha", "std error for alpha")
+# colnames(tableE)= c("GMM-1", "CUE-1", "GMM-2", "CUE-2")
+# rownames(tableE)= c("estimated beta", "std error beta",  "estimated alpha", "std error for alpha")
 
-#output tables in latex format
+# #output tables in latex format
 
-xtable(tableE, digits=4, align=c(rep("c", 5)))
-xtable(tableJ, digits=3, align=c(rep("c", 5)))
+# xtable(tableE, digits=4, align=c(rep("c", 5)))
+# xtable(tableJ, digits=3, align=c(rep("c", 5)))
 
 
