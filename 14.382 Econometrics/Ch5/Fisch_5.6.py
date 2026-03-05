@@ -29,11 +29,13 @@ import matplotlib.pyplot as plt
 ####################
 
 
-case = "b"  # case to run: 'a' for B(Z_t)=1, 'b' for B(Z_t)=(1, R_1,t, R_2,t), None for own lag and interactions
+case = None  # case to run: 'a' for B(Z_t)=1, 'b' for B(Z_t)=(1, R_1,t, R_2,t), None for own lag and interactions
 # If case = None, specify nlags and interactions below:
 nlags = 1  # number of lags for instruments
 interactions = False  # whether to include interaction terms in instruments
-n_iter = "cue"  # number of iterations for iterated GMM (or 'cue' for continuously updated GMM)
+n_iter = (
+    50  # number of iterations for iterated GMM (or 'cue' for continuously updated GMM)
+)
 # Part I: Processing Data
 
 # Reading the data

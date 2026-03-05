@@ -1,11 +1,11 @@
-# This empirical example estimates the CCAPM model of Hansen and Singleton (1982, ECMA) to illustrate the GMM estimation of 
+# This empirical example estimates the CCAPM model of Hansen and Singleton (1982, ECMA) to illustrate the GMM estimation of
 # nonlinear models
 # Authors: V. Chernozhukov and I. Fernandez-Val
 
 # Data sources: Saint Louis Fed and Yahoo Finance
 # URL: https://www.stlouisfed.org/, http://finance.yahoo.com/
 
-#   Description of the data: monthly data from 1959:M01 to 2015:M01 (675 obs) of the following variables: 
+#   Description of the data: monthly data from 1959:M01 to 2015:M01 (675 obs) of the following variables:
 # - PCEND: Personal Consumption Expenditures: Nondurable Goods (billions of dollars) from FED
 # - PPCEND: Personal Consumption expenditures: Nondurable goods (chain-type price index), DNDGRG3M086SBEA from FED
 # - CNP16OV: Civilian Noninstitutional Population (thousands of persons) from FED
@@ -51,82 +51,72 @@ library(quantmod)
 
 # write.csv(Ret,file="Data/CCAPM/ccapm-ready-to-use.csv",row.names=FALSE)
 
-Ret= read.csv(file="ccapm-long_mert.csv", header=T)
+Ret <- read.csv(file = "ccapm-long_mert.csv", header = T)
 attach(Ret)
 str(Ret)
 summary(Ret)
-dates = Ret[,1]
-Rc = Ret[,2]
-Rm = Ret[,3]
-Rb = Ret[,4]
+dates <- Ret[, 1]
+Rc <- Ret[, 2]
+Rm <- Ret[, 3]
+Rb <- Ret[, 4]
 ############  Score Functions #####################
-# the score function here returns the n by m  matrix of scores to be used in gmm package; 
+# the score function here returns the n by m  matrix of scores to be used in gmm package;
 # i.e., the return the m- vector of scores g(X_i, \theta) evaluated at each data point X_i
-# for each observation i=1,...,N 
+# for each observation i=1,...,N
 
 # the score function for estimationg CRRA (power utility) preferences with 2 financials assets
 
-g2.x.theta = function(theta, x)
-{
+g2.x.theta <- function(theta, x) {
   # input par vector theta
   # input data matrix
-  y = x[ ,1:3]    #first three columnds of x are y
-  z =  x[, -c(1:3)]  # the rest are instruments
-    rho.1 = (theta[1] * y[ ,2] * y[ ,1]^(-theta[2]) - 1)  # structural res 1
-  rho.2 =  (theta[1] * y[ ,3] * y[ ,1]^(-theta[2]) - 1)    # structural res 2
-  score.1 = rho.1*z #score 1
-  score.2 = rho.2*z #score 2
-  return (cbind( score.1, score.2))    # output m by n matrix of scores
+  y <- x[, 1:3] # first three columnds of x are y
+  z <- x[, -c(1:3)] # the rest are instruments
+  rho.1 <- (theta[1] * y[, 2] * y[, 1]^(-theta[2]) - 1) # structural res 1
+  rho.2 <- (theta[1] * y[, 3] * y[, 1]^(-theta[2]) - 1) # structural res 2
+  score.1 <- rho.1 * z # score 1
+  score.2 <- rho.2 * z # score 2
+  return(cbind(score.1, score.2)) # output m by n matrix of scores
 }
 
 ##################
 
 # Estimation with  Instruments = 1 lag of consumption and stock returns
 
-y     = na.omit(cbind(Rc, Rb, Rm))
-nlags = 1
-z    = cbind(1, Lag(y[ ,1], c(1:nlags)), Lag(y[ ,2], c(1:nlags)), Lag(y[ ,3], c(1:nlags)))
-x    = na.omit(cbind(y,z))
-
+y <- na.omit(cbind(Rc, Rb, Rm))
+nlags <- 1
+z <- cbind(1, Lag(y[, 1], c(1:nlags)), Lag(y[, 2], c(1:nlags)), Lag(y[, 3], c(1:nlags)))
+x <- na.omit(cbind(y, z))
 
 
 # GMM fit
-gmm2.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
-                 method = "BFGS", type="iter", vcov="iid")
-gmm2.fit  = summary(gmm2.fit)
+gmm2.fit <- summary(gmm(g2.x.theta, x, t0 = c(.99, 1), method = "BFGS", type = "iter", vcov = "iid"))
 print(gmm2.fit)
 
 # CUE fit
-gmm2.cue.fit  = gmm(g2.x.theta, x, t0 = c(.99,.5), 
-                     type="cue", vcov="iid")
-gmm2.cue.fit  = summary(gmm2.cue.fit)
+gmm2.cue.fit <- summary(gmm(g2.x.theta, x, t0 = c(.99, .5), type = "cue", vcov = "iid"))
 print(gmm2.cue.fit)
 
-# Estimation with Instrument = 1 lag of Consumption and Market Returns and Squares and Interactions 
+# Estimation with Instrument = 1 lag of Consumption and Market Returns and Squares and Interactions
 
-y     = na.omit(cbind(Rc, Rb, Rm))
-nlags = 1
-z    = cbind(Lag(y[ ,1], c(1:nlags)), Lag(y[ ,2], c(1:nlags)), Lag(y[ ,3], c(1:nlags)))
-z=  cbind( 1, z[,1],z[,2],z[,3], z[,1]^2, z[,2]^2, z[,3]^2, z[,1]*z[,2], z[,1]*z[,3], z[,2]*z[,3])
-x   = na.omit(cbind(y,z))
+y <- na.omit(cbind(Rc, Rb, Rm))
+nlags <- 1
+z <- cbind(Lag(y[, 1], c(1:nlags)), Lag(y[, 2], c(1:nlags)), Lag(y[, 3], c(1:nlags)))
+z <- cbind(1, z[, 1], z[, 2], z[, 3], z[, 1]^2, z[, 2]^2, z[, 3]^2, z[, 1] * z[, 2], z[, 1] * z[, 3], z[, 2] * z[, 3])
+x <- na.omit(cbind(y, z))
 
 
 # GMM fit
-gmm2.zsq.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
-                     vcov="iid", type="iter")
-gmm2.zsq.fit  = summary(gmm2.zsq.fit)
+gmm2.zsq.fit <- summary(gmm(g2.x.theta, x, t0 = c(.99, 1), vcov = "iid", type = "iter"))
 print(gmm2.zsq.fit)
 
 # CUE fit
-gmm2.zsq.cue.fit  = gmm(g2.x.theta, x, t0 = c(.99,1), 
-                         type="cue", vcov="iid")
-gmm2.zsq.cue.fit  = summary(gmm2.zsq.cue.fit)
+gmm2.zsq.cue.fit <- summary(gmm(g2.x.theta, x, t0 = c(.99, 1), type = "cue", vcov = "iid"))
 print(gmm2.zsq.cue.fit)
 
 
 ######### Printing the results####################
 
-library(xtable)  #package to generate nice latex tables
+library(xtable) # package to generate nice latex tables
 
 
 # tableJ= matrix(0, ncol=4, nrow=2)
@@ -154,5 +144,3 @@ library(xtable)  #package to generate nice latex tables
 
 # xtable(tableE, digits=4, align=c(rep("c", 5)))
 # xtable(tableJ, digits=3, align=c(rep("c", 5)))
-
-
