@@ -196,6 +196,8 @@ res = model.fit(
 # Print the results
 print(res.summary(yname="Euler Eq", xname=["alpha", "beta"]))
 print(res.jtest())
+# Print LaTeX representation of the summary table
+print(res.summary(yname="Euler Eq", xname=["alpha", "beta"]).as_latex())
 
 # Run the J-test for overidentifying restrictions
 j_stat, p_value, _ = res.jtest()
