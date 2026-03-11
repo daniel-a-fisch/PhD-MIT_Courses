@@ -92,7 +92,7 @@ df = (
             "Rc"
         ),  # total monthly return to per-capita consumption (deflated)
     )
-    .select(["Rc", "Rm", "Rb"])
+    .select(["Rc", "Rb", "Rm"])
     .drop_nulls()
 )
 
@@ -116,16 +116,16 @@ elif case == "b":
     instruments = [pl.lit(1).alias("const")]  # constant
     for lag in range(1, nlags + 1):
         instruments.append(pl.col("Rc").shift(lag).alias(f"Rc_lag{lag}"))
-        instruments.append(pl.col("Rm").shift(lag).alias(f"Rm_lag{lag}"))
         instruments.append(pl.col("Rb").shift(lag).alias(f"Rb_lag{lag}"))
+        instruments.append(pl.col("Rm").shift(lag).alias(f"Rm_lag{lag}"))
 else:
     # Create instruments  matrix with constant and lagged returns
     instruments = [pl.lit(1).alias("const")]  # constant
 
     for lag in range(1, nlags + 1):
         instruments.append(pl.col("Rc").shift(lag).alias(f"Rc_lag{lag}"))
-        instruments.append(pl.col("Rm").shift(lag).alias(f"Rm_lag{lag}"))
         instruments.append(pl.col("Rb").shift(lag).alias(f"Rb_lag{lag}"))
+        instruments.append(pl.col("Rm").shift(lag).alias(f"Rm_lag{lag}"))
         if interactions:
             instruments.append(
                 (pl.col("Rc").shift(lag) * pl.col("Rm").shift(lag)).alias(
@@ -147,9 +147,9 @@ else:
             instruments.append((pl.col("Rb").shift(lag) ** 2).alias(f"Rb_2_lag{lag}"))
 
 # Combine returns and instruments
-x = df.select(["Rc", "Rm", "Rb"] + instruments).drop_nulls()
+x = df.select(["Rc", "Rb", "Rm"] + instruments).drop_nulls()
 
-endog = x.to_numpy()[:, :3]  # consumption, stock, bond return growth
+endog = x.to_numpy()[:, :3]  # consumption, bond, market return growth (Rc, Rb, Rm)
 exog = x.to_numpy()[:, 3:]  # instruments
 
 
@@ -157,18 +157,18 @@ class HansenSingletonGMM(GMM):
     def momcond(self, params):
         """
         Defines the moment conditions for the Euler equation.
-        params: array-like containing [alpha, beta]
+        params: array-like containing [beta, alpha]
         """
-        alpha, beta = params
+        beta, alpha = params
 
-        # Unpack endogenous variables
+        # Unpack endogenous variables (Rc, Rb, Rm)
         c_growth = self.endog[:, 0]
-        stock_return = self.endog[:, 1]
-        bond_return = self.endog[:, 2]
+        bond_return = self.endog[:, 1]
+        market_return = self.endog[:, 2]
 
-        # Calculate the Euler equation pricing error
-        m1 = beta * c_growth ** (-alpha) * stock_return - 1
-        m2 = beta * c_growth ** (-alpha) * bond_return - 1
+        # Calculate the Euler equation pricing errors
+        m1 = beta * c_growth ** (-alpha) * bond_return - 1
+        m2 = beta * c_growth ** (-alpha) * market_return - 1
 
         # Multiply the error by the instruments (Z) to get the moment conditions.
         g1 = m1[:, None] * self.instrument  # element-wise multiplication
@@ -185,7 +185,7 @@ model = HansenSingletonGMM(endog, exog=exog, instrument=exog, k_moms=exog.shape[
 # Fit the model
 # maxiter determines how many times the weighting matrix is updated (iterated GMM)
 res = model.fit(
-    start_params=[0.5, 0.99],
+    start_params=[0.99, 1.0],
     maxiter=n_iter,
     optim_method="nm",
     inv_weights=None,
@@ -194,8 +194,10 @@ res = model.fit(
 )
 
 # Print the results
-print(res.summary(yname="Euler Eq", xname=["alpha", "beta"]))
+print(res.summary(yname="Euler Eq", xname=["beta", "alpha"]))
 print(res.jtest())
+# Print LaTeX representation of the summary table
+print(res.summary(yname="Euler Eq", xname=["beta", "alpha"]).as_latex())
 
 # Run the J-test for overidentifying restrictions
 j_stat, p_value, _ = res.jtest()
@@ -203,3 +205,30 @@ j_stat, p_value, _ = res.jtest()
 print("--- Hansen's J-Test ---")
 print(f"J-statistic: {j_stat:.4f}")
 print(f"p-value:     {p_value:.4f}")
+
+# Additional diagnostics: show statsmodels' stored jval and the conventional Hansen J
+try:
+    stored_jval = getattr(res, "jval", None)
+    nobs = getattr(res, "nobs", model.nobs)
+    print("\nDiagnostics:")
+    print("statsmodels stored jval (no n factor):", stored_jval)
+    print(
+        "Conventional Hansen J (n * stored jval):",
+        None if stored_jval is None else nobs * stored_jval,
+    )
+
+    # manual calculation of J to control ddof/centering
+    moms_at_est = model.momcond(res.params)
+    gbar = moms_at_est.mean(axis=0)
+    S_ddof0 = np.cov(moms_at_est, rowvar=False, ddof=0)
+    S_ddof1 = np.cov(moms_at_est, rowvar=False, ddof=1)
+    invS0 = np.linalg.pinv(S_ddof0)
+    invS1 = np.linalg.pinv(S_ddof1)
+    J_manual_ddof0 = moms_at_est.shape[0] * (gbar @ invS0 @ gbar)
+    J_manual_ddof1 = moms_at_est.shape[0] * (gbar @ invS1 @ gbar)
+    print("Manual J (ddof=0, divide by n):", J_manual_ddof0)
+    print("Manual J (ddof=1, divide by n-1):", J_manual_ddof1)
+    print("Moment count (nmoms):", moms_at_est.shape[1])
+    print("nobs used for moments:", moms_at_est.shape[0])
+except Exception as e:
+    print("Diagnostics failed:", e)
