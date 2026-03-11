@@ -236,7 +236,8 @@ results['gbf'] = metrics(X_test, y_test, gbf)
 
 from sklearn.neural_network import MLPRegressor
 
-nnet = MLPRegressor((200, 20,), 'relu',
+nnet = MLPRegressor(hidden_layer_sizes=(200, 20,),
+                    activation='relu',
                     learning_rate_init=0.01,
                     batch_size=10, max_iter=10,
                     random_state=123)
@@ -249,7 +250,7 @@ results['nnet'] = metrics(X_test, y_test, nnet)
 We first need to install skorch.
 """
 
-!pip install skorch
+# !pip install skorch
 
 import skorch
 from skorch import NeuralNetRegressor
@@ -300,7 +301,7 @@ pd.DataFrame({'weight': stack_ols.coef_}, index=method_name)
 mse = np.mean((y_test - stack_ols.predict(ypreds))**2)
 r2 = 1 - mse / np.var(y_test)
 
-mse, r2
+print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
 
 """Alternatively, we can determine the weights via lasso regression."""
 
@@ -313,7 +314,7 @@ pd.DataFrame({'weight': stack_lasso.coef_}, index=method_name)
 mse = np.mean((y_test - stack_lasso.predict(ypreds))**2)
 r2 = 1 - mse / np.var(y_test)
 
-mse, r2
+print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
 
 """# Redoing it in a more  scikit-learn way
 
@@ -458,3 +459,58 @@ train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random
 automl.fit(Z.iloc[train_idx], y[train_idx])
 
 mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
+
+
+"""Construct a partially linear model"""
+class PartiallyLinearRegressor:
+    """
+    Fits y = linear(X_linear) + deviation(X_flex) + eps
+    - base_estimator should implement fit(X, y) and predict(X)
+    - deviation_estimator should implement fit(X, resid) and predict(X)
+    """
+    def __init__(self, base_estimator=None, deviation_estimator=None):
+        self.base = base_estimator if base_estimator is not None else LinearRegression()
+        self.dev = deviation_estimator if deviation_estimator is not None else GradientBoostingRegressor(random_state=123)
+
+    def fit(self, X_linear, X_flex, y):
+        # Handle tuple input
+        if isinstance(X_linear, tuple):
+            X_linear, X_flex = X_linear
+        
+        # Fit linear part on basic features
+        self.base.fit(X_linear, y)
+        # Residuals left for the deviation model
+        resid = y - self.base.predict(X_linear)
+        # Fit deviation model on richer features
+        self.dev.fit(X_flex, resid)
+        return self
+
+    def predict(self, X_linear, X_flex):
+        return self.base.predict(X_linear) + self.dev.predict(X_flex)
+
+# Use LinearRegression for base and a small GB for the deviation
+plr = PartiallyLinearRegressor(
+    base_estimator=LinearRegression(),
+    deviation_estimator=GradientBoostingRegressor(n_estimators=500, learning_rate=0.05, max_depth=3, random_state=123)
+)
+
+# Fit on training data (X_train is the basic design; Xflex_train the richer design)
+plr.fit(X_train, Xflex_train, y_train)
+
+# Predict on test set (combine basic and flexible test designs)
+y_pred_plr = plr.predict(X_test, Xflex_test)
+
+# Evaluate
+results['partially_linear'] = metrics(X_test, y_test, plr)
+mse_plr = mean_squared_error(y_test, y_pred_plr)
+r2_plr = 1 - mse_plr / np.var(y_test)
+print(f'Partially linear model — MSE: {mse_plr:.4f}, R^2: {r2_plr:.4f}')
+
+# Compare to the basic linear model only
+mse_lr = mean_squared_error(y_test, lr_base.predict(X_test))
+r2_lr = 1 - mse_lr / np.var(y_test)
+print(f'Linear base only — MSE: {mse_lr:.4f}, R^2: {r2_lr:.4f}')
+
+# Optional: inspect how much the deviation contributes (mean abs correction)
+mean_abs_corr = np.mean(np.abs(plr.dev.predict(Xflex_test)))
+print(f'Mean absolute deviation correction (test): {mean_abs_corr:.4f}')
