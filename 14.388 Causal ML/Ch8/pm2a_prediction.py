@@ -25,13 +25,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
+from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LassoCV, RidgeCV, ElasticNetCV, LinearRegression
 from sklearn.preprocessing import StandardScaler
 import patsy
 import warnings
 from sklearn.base import BaseEstimator
-warnings.simplefilter('ignore')
+
+warnings.simplefilter("ignore")
 np.random.seed(1234)
 
 file = "https://raw.githubusercontent.com/CausalAIBook/MetricsMLNotebooks/main/data/wage2015_subsample_inference.csv"
@@ -39,16 +41,16 @@ data = pd.read_csv(file)
 
 data.describe()
 
-y = np.log(data['wage']).values
-Z = data.drop(['wage', 'lwage'], axis=1)
+y = np.log(data["wage"]).values
+Z = data.drop(["wage", "lwage"], axis=1)
 Z.columns
 
 """The following figure shows the weekly wage distribution from the US survey data."""
 
 plt.hist(data.wage, bins=np.arange(0, 350, 20))
-plt.xlabel('hourly wage')
-plt.ylabel('Frequency')
-plt.title('Empirical wage distribution from the US survey data')
+plt.xlabel("hourly wage")
+plt.ylabel("Frequency")
+plt.title("Empirical wage distribution from the US survey data")
 plt.ylim((0, 3000))
 
 """Wages show a high degree of skewness. Hence, wages are transformed in almost all studies by
@@ -74,22 +76,31 @@ Again, we generate $X$ in two ways:
 To evaluate the out-of-sample performance, we split the data first and we use the following helper function to calculate evaluation metrics.
 """
 
-train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random_state=123)
+train_idx, test_idx = train_test_split(
+    np.arange(len(y)), test_size=0.25, random_state=123
+)
 y_train, y_test = y[train_idx], y[test_idx]
 
-Zbase = patsy.dmatrix('0 + sex + exp1 + shs + hsg+ scl + clg + mw + so + we + C(occ2) + C(ind2)',
-                      Z, return_type='dataframe').values
+Zbase = patsy.dmatrix(
+    "0 + sex + exp1 + shs + hsg+ scl + clg + mw + so + we + C(occ2) + C(ind2)",
+    Z,
+    return_type="dataframe",
+).values
 X_train, X_test = Zbase[train_idx], Zbase[test_idx]
 
-Zflex = patsy.dmatrix('0 + sex + (exp1+exp2+exp3+exp4)*(shs+hsg+scl+clg+C(occ2)+C(ind2)+mw+so+we)',
-                      Z, return_type='dataframe').values
+Zflex = patsy.dmatrix(
+    "0 + sex + (exp1+exp2+exp3+exp4)*(shs+hsg+scl+clg+C(occ2)+C(ind2)+mw+so+we)",
+    Z,
+    return_type="dataframe",
+).values
 Xflex_train, Xflex_test = Zflex[train_idx], Zflex[test_idx]
 
+
 def metrics(X_test, y_test, estimator):
-    mse = np.mean((y_test - estimator.predict(X_test))**2)
-    semse = np.std((y_test - estimator.predict(X_test))**2) / np.sqrt(len(y_test))
+    mse = np.mean((y_test - estimator.predict(X_test)) ** 2)
+    semse = np.std((y_test - estimator.predict(X_test)) ** 2) / np.sqrt(len(y_test))
     r2 = 1 - mse / np.var(y_test)
-    print(f'{mse:.4f}, {semse:.4f}, {r2:.4f}')
+    print(f"{mse:.4f}, {semse:.4f}, {r2:.4f}")
     return mse, semse, r2
 
 
@@ -102,7 +113,7 @@ results = {}  # dictionary that will store all the metric results from each esti
 
 lr_base = LinearRegression().fit(X_train, y_train)
 ypred_ols = lr_base.predict(X_test)
-results['ols'] = metrics(X_test, y_test, lr_base)
+results["ols"] = metrics(X_test, y_test, lr_base)
 
 """### High-dimensional specification
 
@@ -111,7 +122,7 @@ We repeat the same procedure for the flexible model.
 
 lr_flex = LinearRegression().fit(Xflex_train, y_train)
 ypred_ols_flex = lr_flex.predict(Xflex_test)
-results['ols_flex'] = metrics(Xflex_test, y_test, lr_flex)
+results["ols_flex"] = metrics(Xflex_test, y_test, lr_flex)
 
 """### Penalized Regressions
 
@@ -122,33 +133,41 @@ First we try a pure `l1` penalty, tuned using cross-validation
 
 cv = KFold(n_splits=5, shuffle=True, random_state=123)
 
-lcv = make_pipeline(StandardScaler(), LassoCV(cv=cv, random_state=123)).fit(X_train, y_train)
+lcv = make_pipeline(StandardScaler(), LassoCV(cv=cv, random_state=123)).fit(
+    X_train, y_train
+)
 ypred_lcv = lcv.predict(X_test)
-results['lcv'] = metrics(X_test, y_test, lcv)
+results["lcv"] = metrics(X_test, y_test, lcv)
 
-lcv_flex = make_pipeline(StandardScaler(), LassoCV(cv=cv, random_state=123)).fit(Xflex_train, y_train)
+lcv_flex = make_pipeline(StandardScaler(), LassoCV(cv=cv, random_state=123)).fit(
+    Xflex_train, y_train
+)
 ypred_lcv_flex = lcv_flex.predict(Xflex_test)
-results['lcv_flex'] = metrics(Xflex_test, y_test, lcv_flex)
+results["lcv_flex"] = metrics(Xflex_test, y_test, lcv_flex)
 
 """Then we try a pure `l2` penalty, tuned using cross-validation"""
 
 rcv = make_pipeline(StandardScaler(), RidgeCV(cv=cv)).fit(X_train, y_train)
 ypred_rcv = rcv.predict(X_test)
-results['rcv'] = metrics(X_test, y_test, rcv)
+results["rcv"] = metrics(X_test, y_test, rcv)
 
 rcv_flex = make_pipeline(StandardScaler(), RidgeCV(cv=cv)).fit(Xflex_train, y_train)
 ypred_rcv_flex = rcv_flex.predict(Xflex_test)
-results['rcv_flex'] = metrics(Xflex_test, y_test, rcv_flex)
+results["rcv_flex"] = metrics(Xflex_test, y_test, rcv_flex)
 
 """Finally, we try an equal combination of the two penalties, with the overall weight tuned using cross validation"""
 
-ecv = make_pipeline(StandardScaler(), ElasticNetCV(cv=cv, random_state=123)).fit(X_train, y_train)
+ecv = make_pipeline(StandardScaler(), ElasticNetCV(cv=cv, random_state=123)).fit(
+    X_train, y_train
+)
 ypred_ecv = ecv.predict(X_test)
-results['ecv'] = metrics(X_test, y_test, ecv)
+results["ecv"] = metrics(X_test, y_test, ecv)
 
-ecv_flex = make_pipeline(StandardScaler(), ElasticNetCV(cv=cv, random_state=123)).fit(Xflex_train, y_train)
+ecv_flex = make_pipeline(StandardScaler(), ElasticNetCV(cv=cv, random_state=123)).fit(
+    Xflex_train, y_train
+)
 ypred_ecv_flex = ecv_flex.predict(Xflex_test)
-results['ecv_flex'] = metrics(Xflex_test, y_test, ecv_flex)
+results["ecv_flex"] = metrics(Xflex_test, y_test, ecv_flex)
 
 """We can also try a variant of the `l1` penalty, where the weight is chosen based on theoretical derivations. This is a based on a Python implementation that tries to replicate the main function of hdm r-package. It was made by [Max Huppertz](https://maxhuppertz.github.io/code/). His library is this [repository](https://github.com/maxhuppertz/hdmpy). Download its repository and copy this folder to your site-packages folder. In my case it is located here ***C:\Python\Python38\Lib\site-packages*** . It requires the multiprocess package ***pip install multiprocess***."""
 
@@ -156,6 +175,7 @@ results['ecv_flex'] = metrics(Xflex_test, y_test, ecv_flex)
 # !pip install multiprocess
 
 import sys
+
 sys.path.insert(1, "./hdmpy")
 import hdmpy
 from sklearn.base import RegressorMixin
@@ -173,30 +193,35 @@ class RLasso(BaseEstimator, RegressorMixin):
 
     @property
     def coef_(self):
-        return np.array(self.rlasso_.est['beta']).flatten()
+        return np.array(self.rlasso_.est["beta"]).flatten()
 
     @property
     def intercept_(self):
-        return np.array(self.rlasso_.est['intercept'])
+        return np.array(self.rlasso_.est["intercept"])
 
     def predict(self, X):
         return X @ self.coef_ + self.intercept_
 
+
 lasso = make_pipeline(StandardScaler(), RLasso(post=False)).fit(X_train, y_train)
 ypred_lasso = lasso.predict(X_test)
-results['lasso'] = metrics(X_test, y_test, lasso)
+results["lasso"] = metrics(X_test, y_test, lasso)
 
-lasso_flex = make_pipeline(StandardScaler(), RLasso(post=False)).fit(Xflex_train, y_train)
+lasso_flex = make_pipeline(StandardScaler(), RLasso(post=False)).fit(
+    Xflex_train, y_train
+)
 ypred_lasso_flex = lasso_flex.predict(Xflex_test)
-results['lasso_flex'] = metrics(Xflex_test, y_test, lasso_flex)
+results["lasso_flex"] = metrics(Xflex_test, y_test, lasso_flex)
 
 postlasso = make_pipeline(StandardScaler(), RLasso(post=True)).fit(X_train, y_train)
 ypred_postlasso = postlasso.predict(X_test)
-results['postlasso'] = metrics(X_test, y_test, postlasso)
+results["postlasso"] = metrics(X_test, y_test, postlasso)
 
-postlasso_flex = make_pipeline(StandardScaler(), RLasso(post=True)).fit(Xflex_train, y_train)
+postlasso_flex = make_pipeline(StandardScaler(), RLasso(post=True)).fit(
+    Xflex_train, y_train
+)
 ypred_postlasso_flex = postlasso_flex.predict(Xflex_test)
-results['postlasso_flex'] = metrics(Xflex_test, y_test, postlasso_flex)
+results["postlasso_flex"] = metrics(Xflex_test, y_test, postlasso_flex)
 
 """# Non-Linear Models
 
@@ -209,9 +234,11 @@ We fit a regression tree to the training data using the basic model. The variabl
 
 from sklearn.tree import DecisionTreeRegressor
 
-dtr = DecisionTreeRegressor(ccp_alpha=0.001, min_samples_leaf=5, random_state=123).fit(X_train, y_train)
+dtr = DecisionTreeRegressor(ccp_alpha=0.001, min_samples_leaf=5, random_state=123).fit(
+    X_train, y_train
+)
 ypred_dtr = dtr.predict(X_test)
-results['dtr'] = metrics(X_test, y_test, dtr)
+results["dtr"] = metrics(X_test, y_test, dtr)
 
 """## Random Forests"""
 
@@ -220,30 +247,37 @@ from sklearn.ensemble import RandomForestRegressor
 rf = RandomForestRegressor(n_estimators=2000, min_samples_leaf=5, random_state=123)
 rf.fit(X_train, y_train)
 ypred_rf = rf.predict(X_test)
-results['rf'] = metrics(X_test, y_test, rf)
+results["rf"] = metrics(X_test, y_test, rf)
 
 """## Gradient Boosted Forests"""
 
 from sklearn.ensemble import GradientBoostingRegressor
 
-gbf = GradientBoostingRegressor(n_estimators=1000, learning_rate=.01,
-                                subsample=.5, max_depth=2, random_state=123)
+gbf = GradientBoostingRegressor(
+    n_estimators=1000, learning_rate=0.01, subsample=0.5, max_depth=2, random_state=123
+)
 gbf.fit(X_train, y_train)
 ypred_gbf = gbf.predict(X_test)
-results['gbf'] = metrics(X_test, y_test, gbf)
+results["gbf"] = metrics(X_test, y_test, gbf)
 
 """## NNets"""
 
 from sklearn.neural_network import MLPRegressor
 
-nnet = MLPRegressor(hidden_layer_sizes=(200, 20,),
-                    activation='relu',
-                    learning_rate_init=0.01,
-                    batch_size=10, max_iter=10,
-                    random_state=123)
+nnet = MLPRegressor(
+    hidden_layer_sizes=(
+        200,
+        20,
+    ),
+    activation="relu",
+    learning_rate_init=0.01,
+    batch_size=10,
+    max_iter=10,
+    random_state=123,
+)
 nnet.fit(X_train, y_train)
 ypred_nnet = nnet.predict(X_test)
-results['nnet'] = metrics(X_test, y_test, nnet)
+results["nnet"] = metrics(X_test, y_test, nnet)
 
 """### Using the PyTorch Neural Network Library and its Sklearn API Skorch
 
@@ -257,21 +291,181 @@ from skorch import NeuralNetRegressor
 import torch.nn as nn
 import torch
 
-arch = nn.Sequential(nn.Linear(X_train.shape[1], 200), nn.ReLU(),
-                     nn.Linear(200, 20), nn.ReLU(),
-                     nn.Linear(20, 1))
-nnet_early = NeuralNetRegressor(arch, lr=0.01, batch_size=10,
-                                max_epochs=100,
-                                optimizer=torch.optim.Adam,
-                                callbacks=[skorch.callbacks.EarlyStopping()])
+arch = nn.Sequential(
+    nn.Linear(X_train.shape[1], 200),
+    nn.ReLU(),
+    nn.Linear(200, 20),
+    nn.ReLU(),
+    nn.Linear(20, 1),
+)
+nnet_early = NeuralNetRegressor(
+    arch,
+    lr=0.01,
+    batch_size=10,
+    max_epochs=100,
+    optimizer=torch.optim.Adam,
+    callbacks=[skorch.callbacks.EarlyStopping()],
+)
 nnet_early.fit(X_train.astype(np.float32), y_train.reshape(-1, 1).astype(np.float32))
 ypred_nnet_early = nnet_early.predict(X_test.astype(np.float32)).flatten()
-results['nnet_early'] = metrics(X_test.astype(np.float32),
-                                y_test.reshape(-1, 1).astype(np.float32), nnet_early)
+results["nnet_early"] = metrics(
+    X_test.astype(np.float32), y_test.reshape(-1, 1).astype(np.float32), nnet_early
+)
+
+
+"""Construct a partially linear model"""
+
+
+class PartiallyLinearRegressor:
+    """
+    Fits y = linear(X_linear) + deviation(X_flex) + eps
+    - base_estimator should implement fit(X, y) and predict(X)
+    - deviation_estimator should implement fit(X, resid) and predict(X)
+    Optional CV tuning for the deviation estimator can be enabled by
+    passing a `deviation_param_grid` and (optionally) `deviation_cv`.
+    """
+
+    def __init__(
+        self,
+        base_estimator=None,
+        deviation_estimator=None,
+        deviation_param_grid=None,
+        deviation_cv=None,
+    ):
+        self.base = base_estimator if base_estimator is not None else LinearRegression()
+        self.dev = (
+            deviation_estimator
+            if deviation_estimator is not None
+            else GradientBoostingRegressor(random_state=123)
+        )
+        self.dev_param_grid = deviation_param_grid
+        self.dev_cv = deviation_cv
+
+    def input_X(self, X):
+        # Handle tuple input
+        if isinstance(X, tuple):
+            X_linear, X_flex = X
+        else:
+            X_linear = X
+            X_flex = X
+        return X_linear, X_flex
+
+    def fit(self, X, y):
+        X_linear, X_flex = self.input_X(X)
+
+        # Fit linear part on basic features
+        self.base.fit(X_linear, y)
+        # Residuals left for the deviation model
+        resid = y - self.base.predict(X_linear)
+
+        # Fit deviation model on richer features; optionally tune with GridSearchCV
+        if self.dev_param_grid is not None:
+            gs = GridSearchCV(
+                self.dev, self.dev_param_grid, cv=self.dev_cv or 5, n_jobs=-1
+            )
+            gs.fit(X_flex, resid)
+            self.dev = gs.best_estimator_
+        else:
+            self.dev.fit(X_flex, resid)
+
+        return self
+
+    def predict(self, X):
+        X_linear, X_flex = self.input_X(X)
+        return self.base.predict(X_linear) + self.dev.predict(X_flex)
+
+
+# Option: enable CV tuning for the deviation model (set to True to run GridSearchCV)
+use_dev_cv = False
+
+dev_param_grid = {
+    "n_estimators": [50, 100, 250],
+    "max_depth": [3, 4, 5],
+    "learning_rate": [0.01, 0.05],
+}
+
+# Use LinearRegression for base and a small GB for the deviation
+plr = PartiallyLinearRegressor(
+    base_estimator=LinearRegression(),
+    deviation_estimator=GradientBoostingRegressor(
+        n_estimators=500, learning_rate=0.05, max_depth=3, random_state=123
+    ),
+    deviation_param_grid=dev_param_grid if use_dev_cv else None,
+    deviation_cv=cv if use_dev_cv else None,
+)
+
+# Fit on training data (X_train is the basic design; Xflex_train the richer design)
+plr.fit((X_train, Xflex_train), y_train)
+
+# Predict on test set (combine basic and flexible test designs)
+y_pred_plr = plr.predict((X_test, Xflex_test))
+
+# Evaluate
+mse_plr, semse_plr, r2_plr =metrics((X_test, Xflex_test), y_test, plr)
+if not use_dev_cv:
+    results["partially_linear"] = mse_plr, semse_plr, r2_plr
+else:
+    results["partially_linear_CV"] = mse_plr, semse_plr, r2_plr
+
+print(f"Partially linear model — MSE: {mse_plr:.4f}, R^2: {r2_plr:.4f}")
+
+# --- Diagnostics for PLR ---
+import os
+from sklearn.metrics import mean_squared_error
+suff = "_CV" if use_dev_cv else ""
+mse_ols, semse_ols, r2_ols = results["ols"]
+
+# Train MSE comparison (base vs PLR)
+y_pred_base_train = lr_base.predict(X_train)
+y_pred_plr_train = plr.predict((X_train, Xflex_train))
+train_mse_lr = mean_squared_error(y_train, y_pred_base_train)
+train_mse_plr = mean_squared_error(y_train, y_pred_plr_train)
+print(f"Train MSE - OLS: {train_mse_lr:.6f}, PLR: {train_mse_plr:.6f}")
+
+# Deviation predictions on test set
+dev_pred_test = plr.dev.predict(Xflex_test)
+mean_abs_corr = np.mean(np.abs(dev_pred_test))
+var_dev = np.var(dev_pred_test)
+corr_with_resid = np.corrcoef(dev_pred_test, (y_test - lr_base.predict(X_test)))[0, 1]
+print(
+    f"Deviation (test) - mean abs: {mean_abs_corr:.6f}, var: {var_dev:.6f}, corr with residual: {corr_with_resid:.4f}"
+)
+
+# Save diagnostic plots
+os.makedirs("diagnostics", exist_ok=True)
+plt.figure(figsize=(6, 4))
+plt.scatter(y_test - lr_base.predict(X_test), dev_pred_test, alpha=0.4)
+plt.axhline(0, color="k", linewidth=0.5)
+plt.xlabel("Residual (y_test - OLS_pred)")
+plt.ylabel("PLR deviation prediction")
+plt.title("PLR deviation vs OLS residual (test)")
+plt.tight_layout()
+plt.savefig(f"diagnostics/plr_dev_vs_resid{suff}.png", dpi=150)
+plt.close()
+
+plt.figure(figsize=(6, 4))
+bars = [train_mse_lr, train_mse_plr, mse_ols, mse_plr]
+labels = ["Train OLS", "Train PLR", "Test OLS", "Test PLR"]
+plt.bar(labels, bars)
+plt.ylabel("MSE")
+plt.title("Train/Test MSE comparison")
+if use_dev_cv:
+    plt.title("Train/Test MSE comparison (PLR with CV)")
+plt.tight_layout()
+plt.savefig(f"diagnostics/plr_mse_compare{suff}.png", dpi=150)
+plt.close()
+
+print(
+    "Diagnostics saved to diagnostics/plr_dev_vs_resid{suff}.png and diagnostics/plr_mse_compare{suff}.png"
+)
+
+"""Results from all the considered methods are summarized in the following table."""
 
 df = pd.DataFrame(results).T
-df.columns = ['MSE', 'S.E. MSE', '$R^2$']
-df
+df.columns = ["MSE", "S.E. MSE", "$R^2$"]
+print(df)
+ 
+print(df.to_latex())
 
 """Above, we displayed the results for a single split of data into the training and testing part. The table shows the test MSE in column 1 as well as the standard error in column 2 and the test $R^2$
 in column 3. We see that the prediction rule produced by Cross-Validated Lasso using the flexible model performs the best here, giving the lowest test MSE. Cross-Validated Ridge performs nearly as well. For the majority of the considered methods, test MSEs are within one standard error of each other. Remarkably, OLS with just the basic variables performs extremely well. However, OLS on a flexible model with many regressors performs very poorly giving the highest test MSE. It is worth noticing that, as this is just a simple illustration that is meant to be relatively quick, the nonlinear methods are not tuned. Thus, there is potential to improve the performance of the nonlinear methods we used in the analysis.
@@ -283,22 +477,55 @@ In the final step, we can build a prediction model by combining the strength of 
 where the $f_k$'s denote our prediction rules from the table above and the $\alpha_k$'s are the corresponding weights. We choose to estimate the weights here without penalization.
 """
 
-method_name = ['OLS', 'OLS (flexible)', 'CV Lasso', 'CV Lasso (flexible)',
-               'CV Ridge', 'CV Ridge (flexible)', 'CV ElasticNet', 'CV ElasticNet (flexible)',
-               'Lasso', 'Lasso (flexible)', 'Post-Lasso OLS', 'Post-Lasso OLS (flexible)',
-               'Decision Tree', 'Random Forest', 'Boosted Forest', 'Neural Net', 'Neural Net (early stopping)']
-ypreds = np.stack((ypred_ols, ypred_ols_flex, ypred_lcv, ypred_lcv_flex,
-                   ypred_rcv, ypred_rcv_flex, ypred_ecv, ypred_ecv_flex,
-                   ypred_lasso, ypred_lasso_flex, ypred_postlasso, ypred_postlasso_flex,
-                   ypred_dtr, ypred_rf, ypred_gbf, ypred_nnet, ypred_nnet_early), axis=-1)
+method_name = [
+    "OLS",
+    "OLS (flexible)",
+    "CV Lasso",
+    "CV Lasso (flexible)",
+    "CV Ridge",
+    "CV Ridge (flexible)",
+    "CV ElasticNet",
+    "CV ElasticNet (flexible)",
+    "Lasso",
+    "Lasso (flexible)",
+    "Post-Lasso OLS",
+    "Post-Lasso OLS (flexible)",
+    "Decision Tree",
+    "Random Forest",
+    "Boosted Forest",
+    "Neural Net",
+    "Neural Net (early stopping)",
+]
+ypreds = np.stack(
+    (
+        ypred_ols,
+        ypred_ols_flex,
+        ypred_lcv,
+        ypred_lcv_flex,
+        ypred_rcv,
+        ypred_rcv_flex,
+        ypred_ecv,
+        ypred_ecv_flex,
+        ypred_lasso,
+        ypred_lasso_flex,
+        ypred_postlasso,
+        ypred_postlasso_flex,
+        ypred_dtr,
+        ypred_rf,
+        ypred_gbf,
+        ypred_nnet,
+        ypred_nnet_early,
+    ),
+    axis=-1,
+)
 
 stack_ols = LinearRegression().fit(ypreds, y_test)
 
-pd.DataFrame({'weight': stack_ols.coef_}, index=method_name)
+pd.DataFrame({"weight": stack_ols.coef_}, index=method_name)
 
 """We can calculate the test sample MSE. Though for more unbiased performance evaluation, we should have left out a third sample to validate the performance of the stacked model."""
 
-mse = np.mean((y_test - stack_ols.predict(ypreds))**2)
+mse = np.mean((y_test - stack_ols.predict(ypreds)) ** 2)
 r2 = 1 - mse / np.var(y_test)
 
 print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
@@ -307,11 +534,11 @@ print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
 
 stack_lasso = RLasso(post=False).fit(ypreds, y_test)
 
-pd.DataFrame({'weight': stack_lasso.coef_}, index=method_name)
+pd.DataFrame({"weight": stack_lasso.coef_}, index=method_name)
 
 """We can calculate the test sample MSE. Though for more unbiased performance evaluation, we should have left out a third sample to validate the performance of the stacked model."""
 
-mse = np.mean((y_test - stack_lasso.predict(ypreds))**2)
+mse = np.mean((y_test - stack_lasso.predict(ypreds)) ** 2)
 r2 = 1 - mse / np.var(y_test)
 
 print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
@@ -330,41 +557,87 @@ class FormulaTransformer(TransformerMixin, BaseEstimator):
         self.formula = formula
 
     def fit(self, X, y=None):
-        mat = patsy.dmatrix(self.formula, X, return_type='matrix')
+        mat = patsy.dmatrix(self.formula, X, return_type="matrix")
         self.design_info = mat.design_info
         return self
 
     def transform(self, X, y=None):
         return patsy.build_design_matrices([self.design_info], X)[0]
 
-base = FormulaTransformer('0 + sex + exp1 + shs + hsg+ scl + clg + mw + so + we + C(occ2) + C(ind2)')
-flex = FormulaTransformer('0 + sex + (exp1+exp2+exp3+exp4)*(shs+hsg+scl+clg+C(occ2)+C(ind2)+mw+so+we)')
 
-methods = [('ols', make_pipeline(base, LinearRegression())),
-           ('ols_flex', make_pipeline(flex, LinearRegression())),
-           ('lasso', make_pipeline(base, StandardScaler(), RLasso(post=False))),
-           ('lasso_flex', make_pipeline(flex, StandardScaler(), RLasso(post=False))),
-           ('postlasso', make_pipeline(base, StandardScaler(), RLasso(post=True))),
-           ('postlasso_flex', make_pipeline(flex, StandardScaler(), RLasso(post=True))),
-           ('lcv', make_pipeline(base, StandardScaler(), LassoCV())),
-           ('lcv_flex', make_pipeline(flex, StandardScaler(), LassoCV())),
-           ('rcv', make_pipeline(base, StandardScaler(), RidgeCV())),
-           ('rcv_flex', make_pipeline(flex, StandardScaler(), RidgeCV())),
-           ('ecv', make_pipeline(base, StandardScaler(), ElasticNetCV())),
-           ('ecv_flex', make_pipeline(flex, StandardScaler(), ElasticNetCV())),
-           ('dtr', make_pipeline(base, DecisionTreeRegressor(ccp_alpha=0.001, min_samples_leaf=5,
-                                                             random_state=123))),
-           ('rf', make_pipeline(base, RandomForestRegressor(n_estimators=2000, min_samples_leaf=5,
-                                                            random_state=123))),
-           ('gbf', make_pipeline(base, GradientBoostingRegressor(n_estimators=1000, learning_rate=.01,
-                                                                 subsample=.5, max_depth=2,
-                                                                 random_state=123))),
-           ('nnet', make_pipeline(base, MLPRegressor((200, 20,), 'relu',
-                                                     learning_rate_init=0.01,
-                                                     batch_size=10, max_iter=10,
-                                                     random_state=123)))]
+base = FormulaTransformer(
+    "0 + sex + exp1 + shs + hsg+ scl + clg + mw + so + we + C(occ2) + C(ind2)"
+)
+flex = FormulaTransformer(
+    "0 + sex + (exp1+exp2+exp3+exp4)*(shs+hsg+scl+clg+C(occ2)+C(ind2)+mw+so+we)"
+)
 
-train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random_state=123)
+methods = [
+    ("ols", make_pipeline(base, LinearRegression())),
+    ("ols_flex", make_pipeline(flex, LinearRegression())),
+    ("lasso", make_pipeline(base, StandardScaler(), RLasso(post=False))),
+    ("lasso_flex", make_pipeline(flex, StandardScaler(), RLasso(post=False))),
+    ("postlasso", make_pipeline(base, StandardScaler(), RLasso(post=True))),
+    ("postlasso_flex", make_pipeline(flex, StandardScaler(), RLasso(post=True))),
+    ("lcv", make_pipeline(base, StandardScaler(), LassoCV())),
+    ("lcv_flex", make_pipeline(flex, StandardScaler(), LassoCV())),
+    ("rcv", make_pipeline(base, StandardScaler(), RidgeCV())),
+    ("rcv_flex", make_pipeline(flex, StandardScaler(), RidgeCV())),
+    ("ecv", make_pipeline(base, StandardScaler(), ElasticNetCV())),
+    ("ecv_flex", make_pipeline(flex, StandardScaler(), ElasticNetCV())),
+    (
+        "dtr",
+        make_pipeline(
+            base,
+            DecisionTreeRegressor(
+                ccp_alpha=0.001, min_samples_leaf=5, random_state=123
+            ),
+        ),
+    ),
+    (
+        "rf",
+        make_pipeline(
+            base,
+            RandomForestRegressor(
+                n_estimators=2000, min_samples_leaf=5, random_state=123
+            ),
+        ),
+    ),
+    (
+        "gbf",
+        make_pipeline(
+            base,
+            GradientBoostingRegressor(
+                n_estimators=1000,
+                learning_rate=0.01,
+                subsample=0.5,
+                max_depth=2,
+                random_state=123,
+            ),
+        ),
+    ),
+    (
+        "nnet",
+        make_pipeline(
+            base,
+            MLPRegressor(
+                (
+                    200,
+                    20,
+                ),
+                "relu",
+                learning_rate_init=0.01,
+                batch_size=10,
+                max_iter=10,
+                random_state=123,
+            ),
+        ),
+    ),
+]
+
+train_idx, test_idx = train_test_split(
+    np.arange(len(y)), test_size=0.25, random_state=123
+)
 
 results = {}
 ypreds = np.zeros((len(test_idx), len(methods)))  # test predictions used for stacking
@@ -375,16 +648,16 @@ for it, (name, estimator) in enumerate(methods):
     ypreds[:, it] = estimator.predict(Z.iloc[test_idx])
 
 df = pd.DataFrame(results).T
-df.columns = ['MSE', 'S.E. MSE', '$R^2$']
+df.columns = ["MSE", "S.E. MSE", "$R^2$"]
 df
 
 stack_lasso = RLasso(post=False).fit(ypreds, y[test_idx])
 
-pd.DataFrame({'weight': stack_lasso.coef_}, index=[name for name, _ in methods])
+pd.DataFrame({"weight": stack_lasso.coef_}, index=[name for name, _ in methods])
 
 """For a more unbiased performance evaluation we should have left a further evaluation sample that was not used for the stacking weights"""
 
-mse = np.mean((y_test - stack_lasso.predict(ypreds))**2)
+mse = np.mean((y_test - stack_lasso.predict(ypreds)) ** 2)
 r2 = 1 - mse / np.var(y_test)
 
 mse, r2
@@ -396,10 +669,7 @@ The sklearn Stacking API wraps the stacking process. Here, we're also using also
 
 from sklearn.ensemble import StackingRegressor
 
-stack = StackingRegressor(methods,
-                          final_estimator=RLasso(),
-                          cv=3,
-                          verbose=3)
+stack = StackingRegressor(methods, final_estimator=RLasso(), cv=3, verbose=3)
 
 """We will construct a stacked ensemble using only the training data for unbiased performance evaluation. The stacking regressor will partition the data in k-folds, based on the `cv` parameter. For each fold it will train each of the estimators in the `methods` parameter on all the data outside of the fold and then predict on the data in the fold. Then using all the predictions on all the data from each method, it will train a `final_estimator` predicting the true outcome using the out-of-fold predictions of each method as features. This will define how the estimators are being aggregated. In the end, all the base estimators are re-fitted on all the data and the final predictor will first predict based on each fitted based estimator and then aggregate based on the fitted `final_estimator`."""
 
@@ -407,7 +677,9 @@ stack.fit(Z.iloc[train_idx], y[train_idx])
 
 """We can see the weights placed on each estimator by accessing the final model"""
 
-pd.DataFrame({'weight': stack.final_estimator_.coef_}, index=[name for name, _ in methods])
+pd.DataFrame(
+    {"weight": stack.final_estimator_.coef_}, index=[name for name, _ in methods]
+)
 
 """Calculate out of sample performance metrics"""
 
@@ -418,15 +690,26 @@ mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], stack)
 # FLAML AutoML Framework
 """
 
-!pip install flaml
+# !pip install flaml
 
 from flaml import AutoML
 
-automl = make_pipeline(base, AutoML(task='regression', time_budget=60, early_stop=True,
-                                    eval_method='cv', n_splits=3, metric='r2',
-                                    verbose=3,))
+automl = make_pipeline(
+    base,
+    AutoML(
+        task="regression",
+        time_budget=60,
+        early_stop=True,
+        eval_method="cv",
+        n_splits=3,
+        metric="r2",
+        verbose=3,
+    ),
+)
 
-train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random_state=123)
+train_idx, test_idx = train_test_split(
+    np.arange(len(y)), test_size=0.25, random_state=123
+)
 
 automl.fit(Z.iloc[train_idx], y[train_idx])
 
@@ -434,83 +717,54 @@ mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
 
 """We see that it best model chosen matches the performance of the stacked estimator we strived to achieve on our own without automl. Moreover, we can also do stacking within the automl framework"""
 
-automl = make_pipeline(base, AutoML(task='regression', time_budget=60, early_stop=True,
-                                    eval_method='cv', n_splits=3, metric='r2',
-                                    estimator_list=['lgbm', 'xgboost', 'xgb_limitdepth', 'rf', 'extra_tree'],
-                                    verbose=3,
-                                    ensemble={'passthrough': False,  # whether stacker will use raw X's or predictions
-                                              'final_estimator': RLasso()}))
-
-train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random_state=123)
-
-automl.fit(Z.iloc[train_idx], y[train_idx])
-
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
-
-automl = make_pipeline(base, AutoML(task='regression', time_budget=60, early_stop=True,
-                                    eval_method='cv', n_splits=3, metric='r2',
-                                    estimator_list=['lgbm', 'xgboost', 'xgb_limitdepth', 'rf', 'extra_tree'],
-                                    verbose=3,
-                                    ensemble={'passthrough': True,  # whether stacker will use raw X's or predictions
-                                              'final_estimator': RLasso()}))
-
-train_idx, test_idx = train_test_split(np.arange(len(y)), test_size=0.25, random_state=123)
-
-automl.fit(Z.iloc[train_idx], y[train_idx])
-
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
-
-
-"""Construct a partially linear model"""
-class PartiallyLinearRegressor:
-    """
-    Fits y = linear(X_linear) + deviation(X_flex) + eps
-    - base_estimator should implement fit(X, y) and predict(X)
-    - deviation_estimator should implement fit(X, resid) and predict(X)
-    """
-    def __init__(self, base_estimator=None, deviation_estimator=None):
-        self.base = base_estimator if base_estimator is not None else LinearRegression()
-        self.dev = deviation_estimator if deviation_estimator is not None else GradientBoostingRegressor(random_state=123)
-
-    def fit(self, X_linear, X_flex, y):
-        # Handle tuple input
-        if isinstance(X_linear, tuple):
-            X_linear, X_flex = X_linear
-        
-        # Fit linear part on basic features
-        self.base.fit(X_linear, y)
-        # Residuals left for the deviation model
-        resid = y - self.base.predict(X_linear)
-        # Fit deviation model on richer features
-        self.dev.fit(X_flex, resid)
-        return self
-
-    def predict(self, X_linear, X_flex):
-        return self.base.predict(X_linear) + self.dev.predict(X_flex)
-
-# Use LinearRegression for base and a small GB for the deviation
-plr = PartiallyLinearRegressor(
-    base_estimator=LinearRegression(),
-    deviation_estimator=GradientBoostingRegressor(n_estimators=500, learning_rate=0.05, max_depth=3, random_state=123)
+automl = make_pipeline(
+    base,
+    AutoML(
+        task="regression",
+        time_budget=60,
+        early_stop=True,
+        eval_method="cv",
+        n_splits=3,
+        metric="r2",
+        estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
+        verbose=3,
+        ensemble={
+            "passthrough": False,  # whether stacker will use raw X's or predictions
+            "final_estimator": RLasso(),
+        },
+    ),
 )
 
-# Fit on training data (X_train is the basic design; Xflex_train the richer design)
-plr.fit(X_train, Xflex_train, y_train)
+train_idx, test_idx = train_test_split(
+    np.arange(len(y)), test_size=0.25, random_state=123
+)
 
-# Predict on test set (combine basic and flexible test designs)
-y_pred_plr = plr.predict(X_test, Xflex_test)
+automl.fit(Z.iloc[train_idx], y[train_idx])
 
-# Evaluate
-results['partially_linear'] = metrics(X_test, y_test, plr)
-mse_plr = mean_squared_error(y_test, y_pred_plr)
-r2_plr = 1 - mse_plr / np.var(y_test)
-print(f'Partially linear model — MSE: {mse_plr:.4f}, R^2: {r2_plr:.4f}')
+mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
 
-# Compare to the basic linear model only
-mse_lr = mean_squared_error(y_test, lr_base.predict(X_test))
-r2_lr = 1 - mse_lr / np.var(y_test)
-print(f'Linear base only — MSE: {mse_lr:.4f}, R^2: {r2_lr:.4f}')
+automl = make_pipeline(
+    base,
+    AutoML(
+        task="regression",
+        time_budget=60,
+        early_stop=True,
+        eval_method="cv",
+        n_splits=3,
+        metric="r2",
+        estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
+        verbose=3,
+        ensemble={
+            "passthrough": True,  # whether stacker will use raw X's or predictions
+            "final_estimator": RLasso(),
+        },
+    ),
+)
 
-# Optional: inspect how much the deviation contributes (mean abs correction)
-mean_abs_corr = np.mean(np.abs(plr.dev.predict(Xflex_test)))
-print(f'Mean absolute deviation correction (test): {mean_abs_corr:.4f}')
+train_idx, test_idx = train_test_split(
+    np.arange(len(y)), test_size=0.25, random_state=123
+)
+
+automl.fit(Z.iloc[train_idx], y[train_idx])
+
+mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
