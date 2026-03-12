@@ -29,9 +29,11 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LassoCV, RidgeCV, ElasticNetCV, LinearRegression
 from sklearn.preprocessing import StandardScaler
+import os
+from sklearn.metrics import mean_squared_error
 import patsy
 import warnings
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 
 warnings.simplefilter("ignore")
 np.random.seed(1234)
@@ -59,18 +61,13 @@ the logarithm.
 ## Analysis
 
 Due to the skewness of the data, we are considering log wages which leads to the following regression model
-
-$$\log(\operatorname{wage}) = g(Z) + \epsilon.$$
-
+    $$\log(\operatorname{wage}) = g(Z) + \epsilon.$$
 We will estimate the two sets of prediction rules: Linear and Nonlinear Models.
 In linear models, we estimate the prediction rule of the form
-
-$$\hat g(Z) = \hat \beta'X.$$
+    $$\hat g(Z) = \hat \beta'X.$$
 Again, we generate $X$ in two ways:
 
 1. Basic Model:   $X$ consists of a set of raw regressors (e.g. gender, experience, education indicators, regional indicators).
-
-
 2. Flexible Model:  $X$ consists of all raw regressors from the basic model plus occupation and industry indicators, transformations (e.g., $\operatorname{exp}^2$ and $\operatorname{exp}^3$) and additional two-way interactions.
 
 To evaluate the out-of-sample performance, we split the data first and we use the following helper function to calculate evaluation metrics.
@@ -127,7 +124,6 @@ results["ols_flex"] = metrics(Xflex_test, y_test, lr_flex)
 """### Penalized Regressions
 
 We observe that ols regression works better for the basic model with smaller $p/n$ ratio. We are proceeding by running penalized regressions.
-
 First we try a pure `l1` penalty, tuned using cross-validation
 """
 
@@ -178,29 +174,24 @@ import sys
 
 sys.path.insert(1, "./hdmpy")
 import hdmpy
-from sklearn.base import RegressorMixin
 
 
 # We wrap the package so that it has the familiar sklearn API
 class RLasso(BaseEstimator, RegressorMixin):
+    # For sklearn compatibility
+    _estimator_type = "regressor"
 
     def __init__(self, *, post=True):
         self.post = post
 
     def fit(self, X, y):
         self.rlasso_ = hdmpy.rlasso(X, y, post=self.post)
+        self.coef_ = np.array(self.rlasso_.est["beta"]).flatten()
+        self.intercept_ = np.array(self.rlasso_.est["intercept"])
         return self
 
-    @property
-    def coef_(self):
-        return np.array(self.rlasso_.est["beta"]).flatten()
-
-    @property
-    def intercept_(self):
-        return np.array(self.rlasso_.est["intercept"])
-
     def predict(self, X):
-        return X @ self.coef_ + self.intercept_
+        return np.array(X @ self.coef_ + self.intercept_)
 
 
 lasso = make_pipeline(StandardScaler(), RLasso(post=False)).fit(X_train, y_train)
@@ -224,11 +215,9 @@ ypred_postlasso_flex = postlasso_flex.predict(Xflex_test)
 results["postlasso_flex"] = metrics(Xflex_test, y_test, postlasso_flex)
 
 """# Non-Linear Models
-
 Besides linear regression models, we consider nonlinear regression models to build a predictive model. We are applying regression trees, random forests, boosted trees and neural nets to estimate the regression function $g(X)$.
 
 ## Regression Trees
-
 We fit a regression tree to the training data using the basic model. The variable *alpha_cp* controls the complexity of the regression tree, i.e. how deep we build the tree.
 """
 
@@ -280,7 +269,6 @@ ypred_nnet = nnet.predict(X_test)
 results["nnet"] = metrics(X_test, y_test, nnet)
 
 """### Using the PyTorch Neural Network Library and its Sklearn API Skorch
-
 We first need to install skorch.
 """
 
@@ -319,8 +307,6 @@ results["nnet_early"] = metrics(
 class PartiallyLinearRegressor:
     """
     Fits y = linear(X_linear) + deviation(X_flex) + eps
-    - base_estimator should implement fit(X, y) and predict(X)
-    - deviation_estimator should implement fit(X, resid) and predict(X)
     Optional CV tuning for the deviation estimator can be enabled by
     passing a `deviation_param_grid` and (optionally) `deviation_cv`.
     """
@@ -410,9 +396,6 @@ else:
 print(f"Partially linear model — MSE: {mse_plr:.4f}, R^2: {r2_plr:.4f}")
 
 # --- Diagnostics for PLR ---
-import os
-from sklearn.metrics import mean_squared_error
-
 suff = "_CV" if use_dev_cv else ""
 mse_ols, semse_ols, r2_ols = results["ols"]
 
@@ -549,8 +532,6 @@ print("Stacked Model — MSE: {:.4f}, R^2: {:.4f}".format(mse, r2))
 We can also do it in a more sklearn way, by defining a formula transformer and corresponding pipelines
 """
 
-from sklearn.base import TransformerMixin, BaseEstimator
-
 
 class FormulaTransformer(TransformerMixin, BaseEstimator):
 
@@ -622,11 +603,11 @@ methods = [
         make_pipeline(
             base,
             MLPRegressor(
-                (
+                hidden_layer_sizes=(
                     200,
                     20,
                 ),
-                "relu",
+                activation="relu",
                 learning_rate_init=0.01,
                 batch_size=10,
                 max_iter=10,
@@ -667,105 +648,107 @@ mse, r2
 
 The sklearn Stacking API wraps the stacking process. Here, we're also using also k-fold cross validation instead of just sample splitting.
 """
+# Not working anymore with the current version of sklearn:
 
-from sklearn.ensemble import StackingRegressor
+# from sklearn.ensemble import StackingRegressor
 
-stack = StackingRegressor(methods, final_estimator=RLasso(), cv=3, verbose=3)
+# stack = StackingRegressor(methods, final_estimator=RLasso(), cv=3, verbose=3)
 
-"""We will construct a stacked ensemble using only the training data for unbiased performance evaluation. The stacking regressor will partition the data in k-folds, based on the `cv` parameter. For each fold it will train each of the estimators in the `methods` parameter on all the data outside of the fold and then predict on the data in the fold. Then using all the predictions on all the data from each method, it will train a `final_estimator` predicting the true outcome using the out-of-fold predictions of each method as features. This will define how the estimators are being aggregated. In the end, all the base estimators are re-fitted on all the data and the final predictor will first predict based on each fitted based estimator and then aggregate based on the fitted `final_estimator`."""
+# """We will construct a stacked ensemble using only the training data for unbiased performance evaluation. The stacking regressor will partition the data in k-folds, based on the `cv` parameter. For each fold it will train each of the estimators in the `methods` parameter on all the data outside of the fold and then predict on the data in the fold. Then using all the predictions on all the data from each method, it will train a `final_estimator` predicting the true outcome using the out-of-fold predictions of each method as features. This will define how the estimators are being aggregated. In the end, all the base estimators are re-fitted on all the data and the final predictor will first predict based on each fitted based estimator and then aggregate based on the fitted `final_estimator`."""
 
-stack.fit(Z.iloc[train_idx], y[train_idx])
+# stack.fit(Z.iloc[train_idx], y[train_idx])
 
-"""We can see the weights placed on each estimator by accessing the final model"""
+# """We can see the weights placed on each estimator by accessing the final model"""
 
-pd.DataFrame(
-    {"weight": stack.final_estimator_.coef_}, index=[name for name, _ in methods]
-)
+# pd.DataFrame(
+#     {"weight": stack.final_estimator_.coef_}, index=[name for name, _ in methods]
+# )
 
-"""Calculate out of sample performance metrics"""
+# """Calculate out of sample performance metrics"""
 
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], stack)
+# mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], stack)
 
 """We find that this stacked estimator achieved the best out of sample performance.
 
 # FLAML AutoML Framework
 """
+# Also not working anymore as "ImportError: cannot import name 'AutoML' from 'flaml'""
 
 # !pip install flaml
 
-from flaml import AutoML
+# from flaml import AutoML
 
-automl = make_pipeline(
-    base,
-    AutoML(
-        task="regression",
-        time_budget=60,
-        early_stop=True,
-        eval_method="cv",
-        n_splits=3,
-        metric="r2",
-        verbose=3,
-    ),
-)
+# automl = make_pipeline(
+#     base,
+#     AutoML(
+#         task="regression",
+#         time_budget=60,
+#         early_stop=True,
+#         eval_method="cv",
+#         n_splits=3,
+#         metric="r2",
+#         verbose=3,
+#     ),
+# )
 
-train_idx, test_idx = train_test_split(
-    np.arange(len(y)), test_size=0.25, random_state=123
-)
+# train_idx, test_idx = train_test_split(
+#     np.arange(len(y)), test_size=0.25, random_state=123
+# )
 
-automl.fit(Z.iloc[train_idx], y[train_idx])
+# automl.fit(Z.iloc[train_idx], y[train_idx])
 
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
+# mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
 
-"""We see that it best model chosen matches the performance of the stacked estimator we strived to achieve on our own without automl. Moreover, we can also do stacking within the automl framework"""
+# """We see that it best model chosen matches the performance of the stacked estimator we strived to achieve on our own without automl. Moreover, we can also do stacking within the automl framework"""
 
-automl = make_pipeline(
-    base,
-    AutoML(
-        task="regression",
-        time_budget=60,
-        early_stop=True,
-        eval_method="cv",
-        n_splits=3,
-        metric="r2",
-        estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
-        verbose=3,
-        ensemble={
-            "passthrough": False,  # whether stacker will use raw X's or predictions
-            "final_estimator": RLasso(),
-        },
-    ),
-)
+# automl = make_pipeline(
+#     base,
+#     AutoML(
+#         task="regression",
+#         time_budget=60,
+#         early_stop=True,
+#         eval_method="cv",
+#         n_splits=3,
+#         metric="r2",
+#         estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
+#         verbose=3,
+#         ensemble={
+#             "passthrough": False,  # whether stacker will use raw X's or predictions
+#             "final_estimator": RLasso(),
+#         },
+#     ),
+# )
 
-train_idx, test_idx = train_test_split(
-    np.arange(len(y)), test_size=0.25, random_state=123
-)
+# train_idx, test_idx = train_test_split(
+#     np.arange(len(y)), test_size=0.25, random_state=123
+# )
 
-automl.fit(Z.iloc[train_idx], y[train_idx])
+# automl.fit(Z.iloc[train_idx], y[train_idx])
 
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
+# mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
 
-automl = make_pipeline(
-    base,
-    AutoML(
-        task="regression",
-        time_budget=60,
-        early_stop=True,
-        eval_method="cv",
-        n_splits=3,
-        metric="r2",
-        estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
-        verbose=3,
-        ensemble={
-            "passthrough": True,  # whether stacker will use raw X's or predictions
-            "final_estimator": RLasso(),
-        },
-    ),
-)
+# automl = make_pipeline(
+#     base,
+#     AutoML(
+#         task="regression",
+#         time_budget=60,
+#         early_stop=True,
+#         eval_method="cv",
+#         n_splits=3,
+#         metric="r2",
+#         estimator_list=["lgbm", "xgboost", "xgb_limitdepth", "rf", "extra_tree"],
+#         verbose=3,
+#         ensemble={
+#             "passthrough": True,  # whether stacker will use raw X's or predictions
+#             "final_estimator": RLasso(),
+#         },
+#     ),
+# )
 
-train_idx, test_idx = train_test_split(
-    np.arange(len(y)), test_size=0.25, random_state=123
-)
+# train_idx, test_idx = train_test_split(
+#     np.arange(len(y)), test_size=0.25, random_state=123
+# )
 
-automl.fit(Z.iloc[train_idx], y[train_idx])
+# automl.fit(Z.iloc[train_idx], y[train_idx])
 
-mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
+# mse, semse, r2 = metrics(Z.iloc[test_idx], y[test_idx], automl)
