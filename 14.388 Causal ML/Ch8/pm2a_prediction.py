@@ -401,7 +401,7 @@ plr.fit((X_train, Xflex_train), y_train)
 y_pred_plr = plr.predict((X_test, Xflex_test))
 
 # Evaluate
-mse_plr, semse_plr, r2_plr =metrics((X_test, Xflex_test), y_test, plr)
+mse_plr, semse_plr, r2_plr = metrics((X_test, Xflex_test), y_test, plr)
 if not use_dev_cv:
     results["partially_linear"] = mse_plr, semse_plr, r2_plr
 else:
@@ -412,6 +412,7 @@ print(f"Partially linear model — MSE: {mse_plr:.4f}, R^2: {r2_plr:.4f}")
 # --- Diagnostics for PLR ---
 import os
 from sklearn.metrics import mean_squared_error
+
 suff = "_CV" if use_dev_cv else ""
 mse_ols, semse_ols, r2_ols = results["ols"]
 
@@ -464,7 +465,7 @@ print(
 df = pd.DataFrame(results).T
 df.columns = ["MSE", "S.E. MSE", "$R^2$"]
 print(df)
- 
+
 print(df.to_latex())
 
 """Above, we displayed the results for a single split of data into the training and testing part. The table shows the test MSE in column 1 as well as the standard error in column 2 and the test $R^2$
