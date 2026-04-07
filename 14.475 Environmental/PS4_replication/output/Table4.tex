@@ -1,0 +1,31 @@
+{
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular*}{\hsize}{@{\hskip\tabcolsep\extracolsep\fill}l*{5}{ccccc}}
+\hline\hline
+                &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}&\multicolumn{1}{c}{(4)}&\multicolumn{1}{c}{(5)}\\
+                &\multicolumn{1}{c}{Corn area}&\multicolumn{1}{c}{Corn share}&\multicolumn{1}{c}{Farm area}&\multicolumn{1}{c}{Num. farms}&\multicolumn{1}{c}{Population}\\
+\hline
+GDD below threshold&   0.0010         &   0.0003\sym{***}&  -0.0001         &  -0.0002         &   0.0006\sym{**} \\
+                & (0.0012)         & (0.0001)         & (0.0001)         & (0.0002)         & (0.0003)         \\
+[1em]
+GDD above threshold&  -0.0005         &  -0.0009\sym{**} &   0.0000         &  -0.0007         &  -0.0008         \\
+                & (0.0038)         & (0.0004)         & (0.0004)         & (0.0010)         & (0.0015)         \\
+[1em]
+Precip below threshold&   0.0264         &  -0.0004         &   0.0037         &   0.0021         &  -0.0236\sym{**} \\
+                & (0.0637)         & (0.0034)         & (0.0035)         & (0.0029)         & (0.0106)         \\
+[1em]
+Precip above threshold&  -0.0051         &  -0.0016         &   0.0007         &  -0.0013         &   0.0047\sym{*}  \\
+                & (0.0063)         & (0.0010)         & (0.0007)         & (0.0033)         & (0.0024)         \\
+[1em]
+Constant        &  -0.0130         &  -0.0174\sym{***}&  -0.0614\sym{***}&  -0.1836\sym{***}&   0.0144         \\
+                & (0.0687)         & (0.0045)         & (0.0075)         & (0.0157)         & (0.0160)         \\
+\hline
+Observations    &     1511         &     1516         &     1523         &     1526         &     1526         \\
+Mean of Dep Variable&    0.075         &    0.002         &   -0.068         &   -0.202         &    0.045         \\
+R squared       &    0.645         &    0.418         &    0.399         &    0.488         &    0.392         \\
+Fixed Effects   &    State         &    State         &    State         &    State         &    State         \\
+T threshold     &       29         &       29         &       29         &       29         &       29         \\
+P threshold     &       42         &       42         &       42         &       42         &       42         \\
+\hline\hline
+\end{tabular*}
+}

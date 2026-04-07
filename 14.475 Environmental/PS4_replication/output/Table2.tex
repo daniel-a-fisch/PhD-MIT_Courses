@@ -1,0 +1,27 @@
+{
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular*}{\hsize}{@{\hskip\tabcolsep\extracolsep\fill}l*{4}{c}}
+\hline\hline
+                &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}&\multicolumn{1}{c}{(4)}\\
+                &\multicolumn{1}{c}{1955-1995}&\multicolumn{1}{c}{1955-1995}&\multicolumn{1}{c}{1960-2000}&\multicolumn{1}{c}{1960-2000}\\
+\hline
+GDD below threshold&   0.0008\sym{***}&   0.0007\sym{*}  &   0.0004\sym{***}&   0.0003\sym{*}  \\
+                & (0.0003)         & (0.0004)         & (0.0001)         & (0.0002)         \\
+[1em]
+GDD above threshold&  -0.0066\sym{***}&  -0.0058\sym{***}&  -0.0031\sym{***}&  -0.0023\sym{**} \\
+                & (0.0013)         & (0.0020)         & (0.0007)         & (0.0010)         \\
+[1em]
+Precip below threshold&   0.0356\sym{***}&   0.0376\sym{***}&   0.0203         &   0.0166         \\
+                & (0.0079)         & (0.0093)         & (0.0135)         & (0.0115)         \\
+[1em]
+Precip above threshold&   0.0017         &   0.0033\sym{*}  &   0.0008         &   0.0014         \\
+                & (0.0015)         & (0.0017)         & (0.0015)         & (0.0020)         \\
+\hline
+Observations    &     2060         &     2060         &     2604         &     2604         \\
+R squared       &    0.621         &    0.565         &    0.688         &    0.699         \\
+Fixed Effects   & State Yr         &   Cty Yr         & State Yr         &   Cty Yr         \\
+T threshold     &       29         &       29         &       29         &       29         \\
+P threshold     &       42         &       42         &       42         &       42         \\
+\hline\hline
+\end{tabular*}
+}
