@@ -1,0 +1,43 @@
+\begin{table}[htbp]
+\caption{Baseline replication results: democracy and growth}
+\label{tab:democracy-replication-base}
+\centering
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{FE-based} & \multicolumn{3}{c}{AB-based} & \multicolumn{3}{c}{SH-based} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+ & FE & SBC & ABC4 & AB & BC1 & BC5 & SH & BC1 & BC5 \\
+\midrule
+Democracy (x100) & 1.89 & 2.53 & 1.92 & 3.40 & 3.79 & 3.26 & 6.61 & 10.81 & 8.79 \\
+ & (0.67) &  &  & (3.10) &  &  & (3.37) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\addlinespace
+L1.log(gdp) & 1.15 & 1.35 & 1.15 & 1.12 & 1.21 & 1.21 & 0.70 & 0.83 & 0.82 \\
+ & (0.05) &  &  & (0.05) &  &  & (0.09) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\addlinespace
+L2.log(gdp) & -0.12 & -0.09 & -0.12 & -0.10 & -0.13 & -0.12 & 0.03 & -0.02 & -0.01 \\
+ & (0.06) &  &  & (0.05) &  &  & (0.06) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\addlinespace
+L3.log(gdp) & -0.07 & -0.17 & -0.07 & -0.08 & -0.09 & -0.10 & -0.00 & -0.02 & -0.02 \\
+ & (0.04) &  &  & (0.04) &  &  & (0.03) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\addlinespace
+L4.log(gdp) & -0.08 & -0.08 & -0.08 & -0.09 & -0.10 & -0.09 & -0.05 & -0.06 & -0.06 \\
+ & (0.03) &  &  & (0.03) &  &  & (0.03) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\addlinespace
+Long-run democracy (x100) & 16.05 & 27.61 & 16.49 & 24.75 & 27.90 & 26.43 & 20.85 & 35.19 & 29.11 \\
+ & (6.89) &  &  &  & (23.36) &  & (10.74) &  &  \\
+ &  &  &  &  &  &  &  &  &  \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+\begin{flushleft}
+\footnotesize
+Note 1: FE includes two-way effects; AB and SH follow one-step difference-GMM baseline replication variants.\\
+Note 2: Clustered standard errors (when reported) are at the country level in parentheses.\\
+Note 3: Bootstrap standard errors are in brackets and based on panel resampling by country.
+\end{flushleft}
+\end{table}
