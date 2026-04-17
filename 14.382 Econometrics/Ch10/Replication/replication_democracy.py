@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Baseline Python replication of Democracy-AER-v2.R.
+"""Python translation of Democracy-AER-v2.R.
 
-This script keeps the original R-style estimator set:
+This script reproduces the main workflow from the original R replication code:
 1) Descriptive statistics
-2) Two-way FE with clustered SE
-3) FE split-panel jackknife correction (SBC)
-4) FE analytical bias correction with lag trim 4 (ABC4)
-5) AB-style difference GMM
-6) SH-style score moments estimator
-7) AB/SH split-sample bias corrections (SBC1, SBC5)
-8) Panel bootstrap robust SE
-9) Paper-style LaTeX table output
+2) Two-way fixed effects estimation with clustered SEs
+3) Split-panel jackknife bias correction
+4) Analytical bias correction
+5) Difference-GMM (Arellano-Bond style) using one-step IV-GMM
+6) Anderson-Hsiao IV estimation with split-sample bias corrections
+7) Panel bootstrap robust standard errors
+8) Final summary table
 
-Outputs are written under Results/ using *_base filenames.
+The script assumes the data file democracy-balanced-l4.dta is in the same folder
+as this file.
 """
 
 from __future__ import annotations
@@ -22,14 +22,12 @@ import math
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
-from linearmodels.iv import IVGMM
+from linearmodels.iv import IV2SLS, IVGMM
 from linearmodels.panel import PanelOLS
-from scipy.linalg import qr
 from scipy.stats import norm
 
 
@@ -62,9 +60,9 @@ COL_NAMES = [
     "AB",
     "AB-SBC1",
     "AB-SBC5",
-    "SH",
-    "SH-SBC1",
-    "SH-SBC5",
+    "AH",
+    "AH-SBC1",
+    "AH-SBC5",
 ]
 
 
@@ -138,31 +136,6 @@ def add_lags(df: pd.DataFrame, var: str, max_lag: int) -> pd.DataFrame:
     return out
 
 
-def filter_instruments_full_rank(z: pd.DataFrame, exog: pd.DataFrame) -> pd.DataFrame:
-    if z.shape[1] == 0:
-        return z
-
-    ex = np.asarray(exog, dtype=float)
-    zz = np.asarray(z, dtype=float)
-    a = np.column_stack([ex, zz])
-    qr_out = qr(a, mode="economic", pivoting=True)
-    r = qr_out[1] if len(qr_out) > 1 else np.empty((0, 0))
-    piv = qr_out[2] if len(qr_out) > 2 else np.arange(a.shape[1], dtype=int)
-    diag = np.abs(np.diag(r))
-    if diag.size == 0:
-        return z.iloc[:, []]
-
-    tol = np.max(a.shape) * np.finfo(float).eps * diag[0]
-    rank = int(np.sum(diag > tol))
-    n_exog = ex.shape[1]
-
-    keep = [j - n_exog for j in piv[:rank] if j >= n_exog]
-    keep = sorted(set(keep))
-    if not keep:
-        return z.iloc[:, []]
-    return z.iloc[:, keep]
-
-
 def split_masks_by_year_rank(
     df: pd.DataFrame, rank_cutoff: int = 14
 ) -> tuple[pd.Series, pd.Series]:
@@ -180,7 +153,8 @@ def split_masks_by_year_rank(
 def fit_fe(data: pd.DataFrame) -> EstimationResult:
     df = add_lags(data, "lgdp", 4)
     df = df.set_index(["id", "year"])
-    reg = df.dropna(subset=["lgdp", *FE_PARAM_NAMES])
+    keep_cols = ["lgdp", *FE_PARAM_NAMES]
+    reg = df.dropna(subset=keep_cols)
 
     model = PanelOLS(
         dependent=reg["lgdp"],
@@ -248,7 +222,8 @@ def fit_ab(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
     for k in range(1, 5):
         df[f"d_lgdp_l{k}"] = df[f"lgdp_l{k}"] - df[f"lgdp_l{k+1}"]
 
-    reg = df.dropna(subset=["d_lgdp", *AB_PARAM_NAMES]).copy()
+    req = ["d_lgdp", *AB_PARAM_NAMES]
+    reg = df.dropna(subset=req).copy()
 
     for j in range(2, max_instr_lag + 1):
         reg[f"z_y_l{j}"] = reg[f"lgdp_l{j}"].fillna(0.0)
@@ -261,6 +236,8 @@ def fit_ab(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
         c for c in reg.columns if c.startswith("z_y_l") or c.startswith("z_dem_l")
     ]
     z = reg[z_cols]
+
+    # Remove collinear all-zero instruments to stabilize GMM in finite samples.
     z = z.loc[:, z.var(axis=0) > 0]
 
     model = IVGMM(y, exog=None, endog=endog, instruments=z)
@@ -278,8 +255,8 @@ def fit_ab(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
     return EstimationResult(coefs=coefs, cov=cov, cse=cse, lr=lr, cse_lr=cse_lr)
 
 
-def fit_sh(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
-    # SH score moments use lagged structural regressors in period-specific moment stacks.
+def fit_ah(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
+    # AH uses lagged levels as instruments in the differenced equation.
     df = add_lags(data, "lgdp", max(5, max_instr_lag))
     df = add_lags(df, "dem", max(1, max_instr_lag))
 
@@ -299,43 +276,22 @@ def fit_sh(data: pd.DataFrame, max_instr_lag: int) -> EstimationResult:
         "lgdp_l5",
     ]
     reg = df.dropna(subset=req).copy()
-    reg = reg.sort_values(["id", "year"]).reset_index(drop=True)
-    reg["teff"] = reg.groupby("id", sort=False).cumcount() + 1
 
     y = reg["d_lgdp"]
     endog = reg[AB_PARAM_NAMES]
-    exog = pd.DataFrame(index=reg.index)
-
-    t_eff = int(reg["teff"].max())
-    teff = reg["teff"].to_numpy()
-    x_lag = {
-        "D_l1": reg["dem_l1"].to_numpy(),
-        "Y_l2": reg["lgdp_l2"].to_numpy(),
-        "Y_l3": reg["lgdp_l3"].to_numpy(),
-        "Y_l4": reg["lgdp_l4"].to_numpy(),
-        "Y_l5": reg["lgdp_l5"].to_numpy(),
-    }
-
-    z_dict: dict[str, np.ndarray] = {}
-    for t in range(2, t_eff + 1):
-        mask_t = teff == t
-        for base_name, vals in x_lag.items():
-            col = np.where(mask_t, vals, 0.0)
-            col = np.nan_to_num(col, nan=0.0)
-            if np.var(col) > 0:
-                z_dict[f"z_t{t}_{base_name}"] = col
-
-    z = pd.DataFrame(z_dict, index=reg.index)
-    z = z.loc[:, z.var(axis=0) > 0]
-    z = z.T.drop_duplicates().T
-    z = filter_instruments_full_rank(z, exog)
-
-    model = IVGMM(y, exog=None, endog=endog, instruments=z)
-    fit = model.fit(
-        iter_limit=1,
-        cov_type="clustered",
-        clusters=reg["id"].to_numpy(),
+    z = pd.DataFrame(
+        {
+            "z_dem_l1": reg["dem_l1"],
+            "z_y_l2": reg["lgdp_l2"],
+            "z_y_l3": reg["lgdp_l3"],
+            "z_y_l4": reg["lgdp_l4"],
+            "z_y_l5": reg["lgdp_l5"],
+        }
     )
+    z = z.loc[:, z.var(axis=0) > 0]
+
+    model = IV2SLS(y, exog=None, endog=endog, instruments=z)
+    fit = model.fit(cov_type="clustered", clusters=reg["id"].to_numpy())
 
     coefs = fit.params.loc[AB_PARAM_NAMES].to_numpy(dtype=float)
     cov = fit.cov.loc[AB_PARAM_NAMES, AB_PARAM_NAMES].to_numpy(dtype=float)
@@ -376,9 +332,9 @@ def split_sample_ab_correction(
     return coefs_jbc, lr_jbc
 
 
-def split_sample_sh_correction(
+def split_sample_ah_correction(
     data: pd.DataFrame,
-    base_sh: EstimationResult,
+    base_ah: EstimationResult,
     partitions: int,
     max_instr_lag: int,
     rng: np.random.Generator,
@@ -386,7 +342,7 @@ def split_sample_sh_correction(
     ids = np.array(sorted(data["id"].unique()))
     n = len(ids)
 
-    avg_coefs = np.zeros_like(base_sh.coefs)
+    avg_coefs = np.zeros_like(base_ah.coefs)
     avg_lr = 0.0
 
     for _ in range(partitions):
@@ -396,14 +352,14 @@ def split_sample_sh_correction(
         d1 = data[data["id"].isin(sample1)].copy()
         d2 = data[~data["id"].isin(sample1)].copy()
 
-        sh1 = fit_sh(d1, max_instr_lag=max_instr_lag)
-        sh2 = fit_sh(d2, max_instr_lag=max_instr_lag)
+        ah1 = fit_ah(d1, max_instr_lag=max_instr_lag)
+        ah2 = fit_ah(d2, max_instr_lag=max_instr_lag)
 
-        avg_coefs += 0.5 * (sh1.coefs + sh2.coefs) / partitions
-        avg_lr += 0.5 * (sh1.lr + sh2.lr) / partitions
+        avg_coefs += 0.5 * (ah1.coefs + ah2.coefs) / partitions
+        avg_lr += 0.5 * (ah1.lr + ah2.lr) / partitions
 
-    coefs_jbc = 2.0 * base_sh.coefs - avg_coefs
-    lr_jbc = 2.0 * base_sh.lr - avg_lr
+    coefs_jbc = 2.0 * base_ah.coefs - avg_coefs
+    lr_jbc = 2.0 * base_ah.lr - avg_lr
     return coefs_jbc, lr_jbc
 
 
@@ -485,31 +441,31 @@ def boot_stat_ab(
         return np.full(18, np.nan, dtype=float)
 
 
-def boot_stat_sh(
+def boot_stat_ah(
     data: pd.DataFrame, rng: np.random.Generator, max_instr_lag: int
 ) -> np.ndarray:
     try:
-        sh = fit_sh(data, max_instr_lag=max_instr_lag)
-        coefs_jbc, lr_jbc = split_sample_sh_correction(
+        ah = fit_ah(data, max_instr_lag=max_instr_lag)
+        coefs_jbc, lr_jbc = split_sample_ah_correction(
             data,
-            base_sh=sh,
+            base_ah=ah,
             partitions=1,
             max_instr_lag=max_instr_lag,
             rng=rng,
         )
-        coefs_jbc5, lr_jbc5 = split_sample_sh_correction(
+        coefs_jbc5, lr_jbc5 = split_sample_ah_correction(
             data,
-            base_sh=sh,
+            base_ah=ah,
             partitions=5,
             max_instr_lag=max_instr_lag,
             rng=rng,
         )
         return np.concatenate(
             [
-                sh.coefs,
+                ah.coefs,
                 coefs_jbc,
                 coefs_jbc5,
-                np.array([sh.lr, lr_jbc, lr_jbc5], dtype=float),
+                np.array([ah.lr, lr_jbc, lr_jbc5], dtype=float),
             ]
         )
     except Exception:
@@ -533,8 +489,8 @@ def run_bootstrap(
             out[r, :] = boot_stat_fe(sample, rng)
         elif stat_name == "ab":
             out[r, :] = boot_stat_ab(sample, rng, max_instr_lag=max_instr_lag)
-        elif stat_name == "sh":
-            out[r, :] = boot_stat_sh(sample, rng, max_instr_lag=max_instr_lag)
+        elif stat_name == "ah":
+            out[r, :] = boot_stat_ah(sample, rng, max_instr_lag=max_instr_lag)
         else:
             raise ValueError(f"Unknown bootstrap statistic: {stat_name}")
 
@@ -564,17 +520,17 @@ def build_table(
     bse_lr_ab: float,
     bse_lr_ab_jbc: float,
     bse_lr_ab_jbc5: float,
-    sh: EstimationResult,
-    coefs_sh_jbc: np.ndarray,
-    coefs_sh_jbc5: np.ndarray,
-    lr_sh_jbc: float,
-    lr_sh_jbc5: float,
-    bse_sh: np.ndarray,
-    bse_sh_jbc: np.ndarray,
-    bse_sh_jbc5: np.ndarray,
-    bse_lr_sh: float,
-    bse_lr_sh_jbc: float,
-    bse_lr_sh_jbc5: float,
+    ah: EstimationResult,
+    coefs_ah_jbc: np.ndarray,
+    coefs_ah_jbc5: np.ndarray,
+    lr_ah_jbc: float,
+    lr_ah_jbc5: float,
+    bse_ah: np.ndarray,
+    bse_ah_jbc: np.ndarray,
+    bse_ah_jbc5: np.ndarray,
+    bse_lr_ah: float,
+    bse_lr_ah_jbc: float,
+    bse_lr_ah_jbc5: float,
 ) -> pd.DataFrame:
     table = np.full((18, 9), np.nan, dtype=float)
 
@@ -602,16 +558,6 @@ def build_table(
     table[coef_rows, 5] = coefs_ab_jbc5
     table[bse_rows, 5] = bse_ab_jbc5
 
-    table[coef_rows, 6] = sh.coefs
-    table[cse_rows, 6] = sh.cse
-    table[bse_rows, 6] = bse_sh
-
-    table[coef_rows, 7] = coefs_sh_jbc
-    table[bse_rows, 7] = bse_sh_jbc
-
-    table[coef_rows, 8] = coefs_sh_jbc5
-    table[bse_rows, 8] = bse_sh_jbc5
-
     table[15, 0] = fe.lr
     table[16, 0] = fe.cse_lr
     table[17, 0] = bse_lr_fe
@@ -632,104 +578,146 @@ def build_table(
     table[15, 5] = lr_ab_jbc5
     table[17, 5] = bse_lr_ab_jbc5
 
-    table[15, 6] = sh.lr
-    table[16, 6] = sh.cse_lr
-    table[17, 6] = bse_lr_sh
+    table[coef_rows, 6] = ah.coefs
+    table[cse_rows, 6] = ah.cse
+    table[bse_rows, 6] = bse_ah
 
-    table[15, 7] = lr_sh_jbc
-    table[17, 7] = bse_lr_sh_jbc
+    table[coef_rows, 7] = coefs_ah_jbc
+    table[bse_rows, 7] = bse_ah_jbc
 
-    table[15, 8] = lr_sh_jbc5
-    table[17, 8] = bse_lr_sh_jbc5
+    table[coef_rows, 8] = coefs_ah_jbc5
+    table[bse_rows, 8] = bse_ah_jbc5
+
+    table[15, 6] = ah.lr
+    table[16, 6] = ah.cse_lr
+    table[17, 6] = bse_lr_ah
+
+    table[15, 7] = lr_ah_jbc
+    table[17, 7] = bse_lr_ah_jbc
+
+    table[15, 8] = lr_ah_jbc5
+    table[17, 8] = bse_lr_ah_jbc5
 
     table[[0, 1, 2, 15, 16, 17], :] *= 100.0
 
     return pd.DataFrame(table, index=ROW_NAMES, columns=COL_NAMES)
 
 
-def _fmt(v: object) -> str:
-    if pd.isna(cast(Any, v)):
-        return ""
-    return f"{v:0.2f}"
-
-
-def _wrap(v: object, left: str, right: str) -> str:
-    if pd.isna(cast(Any, v)):
-        return ""
-    return f"{left}{v:0.2f}{right}"
-
-
 def write_latex_table(
-    table: pd.DataFrame, output_path: Path, caption: str, label: str
+    table: pd.DataFrame,
+    output_path: Path,
+    caption: str,
+    label: str,
+    bootstrap_reps: int,
 ) -> None:
-    cols = [
-        "FE",
-        "SBC",
-        "ABC4",
-        "AB",
-        "AB-SBC1",
-        "AB-SBC5",
-        "SH",
-        "SH-SBC1",
-        "SH-SBC5",
-    ]
-    blocks = [
-        ("Democracy (x100)", "Democracy", "CSE", "BSE"),
-        ("L1.log(gdp)", "L1.log(gdp)", "CSE1", "BSE1"),
-        ("L2.log(gdp)", "L2.log(gdp)", "CSE2", "BSE2"),
-        ("L3.log(gdp)", "L3.log(gdp)", "CSE3", "BSE3"),
-        ("L4.log(gdp)", "L4.log(gdp)", "CSE4", "BSE4"),
-        ("Long-run democracy (x100)", "LR-Democracy", "CSE5", "BSE5"),
+    def _col(name: str) -> str:
+        if name not in table.columns:
+            raise KeyError(f"Column '{name}' is required for LaTeX output formatting.")
+        return name
+
+    def _to_finite_float(x: object) -> float | None:
+        if x is None:
+            return None
+        if not isinstance(x, (int, float, np.integer, np.floating, str)):
+            return None
+        try:
+            val = float(x)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(val):
+            return None
+        return val
+
+    def _fmt(x: object, wrap: str | None = None) -> str:
+        val_num = _to_finite_float(x)
+        if val_num is None:
+            return ""
+        val = f"{val_num:0.2f}"
+        if wrap == "()":
+            return f"({val})"
+        if wrap == "[]":
+            return f"[{val}]"
+        return val
+
+    def _join(cells: list[str]) -> str:
+        return " & ".join(cells)
+
+    def _pick_first_finite(vals: list[object]) -> float:
+        for v in vals:
+            vv = _to_finite_float(v)
+            if vv is not None:
+                return vv
+        return np.nan
+
+    ah_cols = [_col("AH"), _col("AH-SBC1"), _col("AH-SBC5")]
+    ab_cols = [_col("AB"), _col("AB-SBC1"), _col("AB-SBC5")]
+    cols = ah_cols + ab_cols
+
+    coef_rows = [
+        (r"Democracy ($\times 100$)", 0),
+        ("L1.log(gdp)", 3),
+        ("L2.log(gdp)", 6),
+        ("L3.log(gdp)", 9),
+        ("L4.log(gdp)", 12),
     ]
 
     lines: list[str] = []
-    lines.append("\\begin{table}[htbp]")
+    lines.append(r"\begin{table}[htbp]")
+    lines.append(r"\centering")
     lines.append(f"\\caption{{{caption}}}")
     lines.append(f"\\label{{{label}}}")
-    lines.append("\\centering")
-    lines.append("\\begin{tabular}{lrrrrrrrrr}")
-    lines.append("\\toprule")
-    lines.append(
-        " & \\multicolumn{3}{c}{FE-based} & \\multicolumn{3}{c}{AB-based} & \\multicolumn{3}{c}{SH-based} \\\\"
-    )
-    lines.append("\\cmidrule(lr){2-4} \\cmidrule(lr){5-7} \\cmidrule(lr){8-10}")
-    lines.append(" & FE & SBC & ABC4 & AB & BC1 & BC5 & SH & BC1 & BC5 \\\\")
-    lines.append("\\midrule")
+    lines.append(r"\begin{tabular}{lrrrrrr}")
+    lines.append(r"\toprule")
+    lines.append(r" & \multicolumn{3}{c}{AH} & \multicolumn{3}{c}{AB} \\")
+    lines.append(r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}")
+    lines.append(r" &  & BC1 & BC5 &  & BC1 & BC5 \\")
+    lines.append(r"\midrule")
 
-    for i, (label_row, coef_row, cse_row, bse_row) in enumerate(blocks):
-        coef_vals = " & ".join(_fmt(table.loc[coef_row, c]) for c in cols)
-        cse_vals = " & ".join(_wrap(table.loc[cse_row, c], "(", ")") for c in cols)
-        bse_vals = " & ".join(_wrap(table.loc[bse_row, c], "[", "]") for c in cols)
+    for row_label, i in coef_rows:
+        coef_vals = [_fmt(table.iloc[i, table.columns.get_loc(c)]) for c in cols]
+        cse_vals = [
+            _fmt(table.iloc[i + 1, table.columns.get_loc(c)], "()") for c in cols
+        ]
+        bse_vals = [
+            _fmt(table.iloc[i + 2, table.columns.get_loc(c)], "[]") for c in cols
+        ]
 
-        lines.append(f"{label_row} & {coef_vals} \\\\")
-        lines.append(f" & {cse_vals} \\\\")
-        lines.append(f" & {bse_vals} \\\\")
-        if i < len(blocks) - 1:
-            lines.append("\\addlinespace")
+        lines.append(f"{row_label} & {_join(coef_vals)} \\\\")
+        lines.append(f" & {_join(cse_vals)} \\\\")
+        lines.append(f" & {_join(bse_vals)} \\\\")
+        lines.append("")
 
-    lines.append("\\bottomrule")
-    lines.append("\\end{tabular}")
-    lines.append("\\vspace{0.5em}")
-    lines.append("\\begin{flushleft}")
-    lines.append("\\footnotesize")
-    lines.append(
-        "Note 1: FE includes two-way effects; AB and SH follow one-step difference-GMM baseline replication variants.\\\\"
+    ah_lr = [_fmt(table.iloc[15, table.columns.get_loc(c)]) for c in ah_cols]
+    ab_lr = [_fmt(table.iloc[15, table.columns.get_loc(c)]) for c in ab_cols]
+
+    ah_lr_cse = _pick_first_finite(
+        [table.iloc[16, table.columns.get_loc(c)] for c in ah_cols]
     )
-    lines.append(
-        "Note 2: Clustered standard errors (when reported) are at the country level in parentheses.\\\\"
+    ab_lr_cse = _pick_first_finite(
+        [table.iloc[16, table.columns.get_loc(c)] for c in ab_cols]
     )
+    lr_cse_cells = [_fmt(ah_lr_cse, "()"), "", "", _fmt(ab_lr_cse, "()"), "", ""]
+
+    ah_lr_bse = [_fmt(table.iloc[17, table.columns.get_loc(c)], "[]") for c in ah_cols]
+    ab_lr_bse = [_fmt(table.iloc[17, table.columns.get_loc(c)], "[]") for c in ab_cols]
+
+    lines.append(r"\midrule")
     lines.append(
-        "Note 3: Bootstrap standard errors are in brackets and based on panel resampling by country."
+        r"Long-run (democracy) ($\times 100$)" + f" & {_join(ah_lr + ab_lr)} \\\\"
     )
-    lines.append("\\end{flushleft}")
-    lines.append("\\end{table}")
+    lines.append(f" & {_join(lr_cse_cells)} \\\\")
+    lines.append(f" & {_join(ah_lr_bse + ab_lr_bse)} \\\\")
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append(r"\vspace{0.3em}")
+    lines.append(r"\end{table}")
 
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Baseline replication of Democracy-AER-v2.R in Python"
+        description="Replication of Democracy-AER-v2.R in Python"
     )
     parser.add_argument(
         "--data",
@@ -741,13 +729,13 @@ def main() -> None:
         "--bootstrap-reps",
         type=int,
         default=500,
-        help="Number of panel bootstrap replications.",
+        help="Number of panel bootstrap replications (R in the original script).",
     )
     parser.add_argument(
         "--max-instr-lag",
         type=int,
         default=22,
-        help="Maximum lag depth for AB/SH instrument construction.",
+        help="Maximum lag depth for GMM instruments (uses lag 2+ for lgdp and lag 1+ for dem).",
     )
     parser.add_argument(
         "--seed",
@@ -763,14 +751,14 @@ def main() -> None:
     parser.add_argument(
         "--latex-caption",
         type=str,
-        default="Baseline replication results: democracy and growth",
-        help="Caption used in the LaTeX table.",
+        default="Replication results of causal impact of democracy on growth as in Table 10.1.",
+        help="Caption used in the LaTeX output table.",
     )
     parser.add_argument(
         "--latex-label",
         type=str,
-        default="tab:democracy-replication-base",
-        help="Label used in the LaTeX table.",
+        default="tab:democracy-replication-results",
+        help="Label used in the LaTeX output table.",
     )
     args = parser.parse_args()
 
@@ -779,6 +767,7 @@ def main() -> None:
         raise FileNotFoundError(f"Data file not found: {data_path}")
 
     data = load_data(data_path)
+
     dstat = descriptive_stats(data)
 
     fe = fit_fe(data)
@@ -796,7 +785,6 @@ def main() -> None:
     lr_abc4 = float(fe.lr - jac_lr_fe @ bias_l4)
 
     rng_main = np.random.default_rng(args.seed)
-
     ab = fit_ab(data, max_instr_lag=args.max_instr_lag)
     coefs_ab_jbc, lr_ab_jbc = split_sample_ab_correction(
         data,
@@ -813,17 +801,17 @@ def main() -> None:
         rng=rng_main,
     )
 
-    sh = fit_sh(data, max_instr_lag=args.max_instr_lag)
-    coefs_sh_jbc, lr_sh_jbc = split_sample_sh_correction(
+    ah = fit_ah(data, max_instr_lag=args.max_instr_lag)
+    coefs_ah_jbc, lr_ah_jbc = split_sample_ah_correction(
         data,
-        base_sh=sh,
+        base_ah=ah,
         partitions=1,
         max_instr_lag=args.max_instr_lag,
         rng=rng_main,
     )
-    coefs_sh_jbc5, lr_sh_jbc5 = split_sample_sh_correction(
+    coefs_ah_jbc5, lr_ah_jbc5 = split_sample_ah_correction(
         data,
-        base_sh=sh,
+        base_ah=ah,
         partitions=5,
         max_instr_lag=args.max_instr_lag,
         rng=rng_main,
@@ -844,16 +832,16 @@ def main() -> None:
         bse_lr_ab_jbc = np.nan
         bse_lr_ab_jbc5 = np.nan
 
-        bse_sh = np.full(5, np.nan)
-        bse_sh_jbc = np.full(5, np.nan)
-        bse_sh_jbc5 = np.full(5, np.nan)
-        bse_lr_sh = np.nan
-        bse_lr_sh_jbc = np.nan
-        bse_lr_sh_jbc5 = np.nan
+        bse_ah = np.full(5, np.nan)
+        bse_ah_jbc = np.full(5, np.nan)
+        bse_ah_jbc5 = np.full(5, np.nan)
+        bse_lr_ah = np.nan
+        bse_lr_ah_jbc = np.nan
+        bse_lr_ah_jbc5 = np.nan
 
         boot_fe = np.full((0, 18), np.nan)
         boot_ab = np.full((0, 18), np.nan)
-        boot_sh = np.full((0, 18), np.nan)
+        boot_ah = np.full((0, 18), np.nan)
     else:
         boot_fe = run_bootstrap(
             data=data,
@@ -869,9 +857,9 @@ def main() -> None:
             seed=args.seed,
             max_instr_lag=args.max_instr_lag,
         )
-        boot_sh = run_bootstrap(
+        boot_ah = run_bootstrap(
             data=data,
-            stat_name="sh",
+            stat_name="ah",
             reps=args.bootstrap_reps,
             seed=args.seed,
             max_instr_lag=args.max_instr_lag,
@@ -899,18 +887,18 @@ def main() -> None:
         bse_lr_ab_jbc = robust_sd(boot_ab[:, 16])
         bse_lr_ab_jbc5 = robust_sd(boot_ab[:, 17])
 
-        bse_sh = np.array([robust_sd(boot_sh[:, i]) for i in range(0, 5)], dtype=float)
-        bse_sh_jbc = np.array(
-            [robust_sd(boot_sh[:, i]) for i in range(5, 10)], dtype=float
+        bse_ah = np.array([robust_sd(boot_ah[:, i]) for i in range(0, 5)], dtype=float)
+        bse_ah_jbc = np.array(
+            [robust_sd(boot_ah[:, i]) for i in range(5, 10)], dtype=float
         )
-        bse_sh_jbc5 = np.array(
-            [robust_sd(boot_sh[:, i]) for i in range(10, 15)], dtype=float
+        bse_ah_jbc5 = np.array(
+            [robust_sd(boot_ah[:, i]) for i in range(10, 15)], dtype=float
         )
-        bse_lr_sh = robust_sd(boot_sh[:, 15])
-        bse_lr_sh_jbc = robust_sd(boot_sh[:, 16])
-        bse_lr_sh_jbc5 = robust_sd(boot_sh[:, 17])
+        bse_lr_ah = robust_sd(boot_ah[:, 15])
+        bse_lr_ah_jbc = robust_sd(boot_ah[:, 16])
+        bse_lr_ah_jbc5 = robust_sd(boot_ah[:, 17])
 
-    table_base = build_table(
+    table_all = build_table(
         fe=fe,
         coefs_jbc_fe=coefs_jbc_fe,
         coefs_abc4=coefs_abc4,
@@ -933,35 +921,36 @@ def main() -> None:
         bse_lr_ab=bse_lr_ab,
         bse_lr_ab_jbc=bse_lr_ab_jbc,
         bse_lr_ab_jbc5=bse_lr_ab_jbc5,
-        sh=sh,
-        coefs_sh_jbc=coefs_sh_jbc,
-        coefs_sh_jbc5=coefs_sh_jbc5,
-        lr_sh_jbc=lr_sh_jbc,
-        lr_sh_jbc5=lr_sh_jbc5,
-        bse_sh=bse_sh,
-        bse_sh_jbc=bse_sh_jbc,
-        bse_sh_jbc5=bse_sh_jbc5,
-        bse_lr_sh=bse_lr_sh,
-        bse_lr_sh_jbc=bse_lr_sh_jbc,
-        bse_lr_sh_jbc5=bse_lr_sh_jbc5,
+        ah=ah,
+        coefs_ah_jbc=coefs_ah_jbc,
+        coefs_ah_jbc5=coefs_ah_jbc5,
+        lr_ah_jbc=lr_ah_jbc,
+        lr_ah_jbc5=lr_ah_jbc5,
+        bse_ah=bse_ah,
+        bse_ah_jbc=bse_ah_jbc,
+        bse_ah_jbc5=bse_ah_jbc5,
+        bse_lr_ah=bse_lr_ah,
+        bse_lr_ah_jbc=bse_lr_ah_jbc,
+        bse_lr_ah_jbc5=bse_lr_ah_jbc5,
     )
 
     pd.set_option("display.float_format", lambda x: f"{x:0.2f}")
     print("\nDescriptive statistics:\n")
     print(dstat)
-    print("\nBaseline table of results:\n")
-    print(table_base)
+    print("\nTable of results:\n")
+    print(table_all)
 
     results_dir = Path(__file__).resolve().parent / "Results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    dstat.to_csv(results_dir / "descriptive_stats_base.csv")
-    table_base.to_csv(results_dir / "table_base.csv")
+    dstat.to_csv(results_dir / "descriptive_stats.csv")
+    table_all.to_csv(results_dir / "table_all.csv")
     write_latex_table(
-        table=table_base,
-        output_path=results_dir / "table_base.tex",
+        table=table_all,
+        output_path=results_dir / "table_all.tex",
         caption=args.latex_caption,
         label=args.latex_label,
+        bootstrap_reps=args.bootstrap_reps,
     )
 
     payload = {
@@ -976,17 +965,17 @@ def main() -> None:
         "coefs_ab_jbc5": coefs_ab_jbc5,
         "lr_ab_jbc": lr_ab_jbc,
         "lr_ab_jbc5": lr_ab_jbc5,
-        "sh": sh,
-        "coefs_sh_jbc": coefs_sh_jbc,
-        "coefs_sh_jbc5": coefs_sh_jbc5,
-        "lr_sh_jbc": lr_sh_jbc,
-        "lr_sh_jbc5": lr_sh_jbc5,
+        "ah": ah,
+        "coefs_ah_jbc": coefs_ah_jbc,
+        "coefs_ah_jbc5": coefs_ah_jbc5,
+        "lr_ah_jbc": lr_ah_jbc,
+        "lr_ah_jbc5": lr_ah_jbc5,
         "boot_fe": boot_fe,
         "boot_ab": boot_ab,
-        "boot_sh": boot_sh,
-        "table_base": table_base,
+        "boot_ah": boot_ah,
+        "table_all": table_all,
     }
-    with open(results_dir / "democracy_results_base.pkl", "wb") as f:
+    with open(results_dir / "democracy_results.pkl", "wb") as f:
         pickle.dump(payload, f)
 
 

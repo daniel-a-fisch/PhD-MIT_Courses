@@ -1,30 +1,44 @@
 \begin{table}[htbp]
+\centering
 \caption{Replication results: Causal impact of democracy on growth}
 \label{tab:democracy-replication-results}
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
- & FE & SBC & AB & AB-SBC1 & AB-SBC5 & AH & AH-SBC1 & AH-SBC5 \\
+ & \multicolumn{3}{c}{AH} & \multicolumn{3}{c}{AB} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ &  & BC1 & BC5 &  & BC1 & BC5 \\
 \midrule
-Democracy & 1.89 & 2.53 & 3.92 & 5.28 & 4.76 & 6.61 & 10.81 & 8.79 \\
-CSE & 0.67 &  & 1.93 &  &  & 3.37 &  &  \\
-BSE &  &  &  &  &  &  &  &  \\
-L1.log(gdp) & 1.15 & 1.35 & 0.55 & 0.62 & 0.63 & 0.70 & 0.83 & 0.82 \\
-CSE1 & 0.05 &  & 0.06 &  &  & 0.09 &  &  \\
-BSE1 &  &  &  &  &  &  &  &  \\
-L2.log(gdp) & -0.12 & -0.09 & 0.08 & 0.05 & 0.05 & 0.03 & -0.02 & -0.01 \\
-CSE2 & 0.06 &  & 0.05 &  &  & 0.06 &  &  \\
-BSE2 &  &  &  &  &  &  &  &  \\
-L3.log(gdp) & -0.07 & -0.17 & 0.03 & 0.01 & 0.01 & -0.00 & -0.02 & -0.02 \\
-CSE3 & 0.04 &  & 0.03 &  &  & 0.03 &  &  \\
-BSE3 &  &  &  &  &  &  &  &  \\
-L4.log(gdp) & -0.08 & -0.08 & -0.04 & -0.05 & -0.05 & -0.05 & -0.06 & -0.06 \\
-CSE4 & 0.03 &  & 0.03 &  &  & 0.03 &  &  \\
-BSE4 &  &  &  &  &  &  &  &  \\
-LR-Democracy & 16.05 & 27.61 & 10.35 & 13.96 & 12.89 & 20.85 & 35.19 & 29.11 \\
-CSE5 & 6.89 &  &  & 5.00 &  & 10.74 &  &  \\
-BSE5 &  &  &  &  &  &  &  &  \\
+Democracy ($\times 100$) & 4.40 & 4.08 & 4.52 & 3.40 & 3.79 & 3.26 \\
+ & (2.02) &  &  & (3.10) &  &  \\
+ & [2.03] & [2.17] & [2.08] & [3.48] & [3.99] & [3.85] \\
+
+L1.log(gdp) & 1.23 & 1.24 & 1.24 & 1.12 & 1.21 & 1.21 \\
+ & (0.07) &  &  & (0.05) &  &  \\
+ & [0.07] & [0.07] & [0.07] & [0.08] & [0.10] & [0.10] \\
+
+L2.log(gdp) & -0.14 & -0.15 & -0.14 & -0.10 & -0.13 & -0.12 \\
+ & (0.07) &  &  & (0.05) &  &  \\
+ & [0.07] & [0.07] & [0.07] & [0.07] & [0.07] & [0.07] \\
+
+L3.log(gdp) & -0.10 & -0.09 & -0.10 & -0.08 & -0.09 & -0.10 \\
+ & (0.04) &  &  & (0.04) &  &  \\
+ & [0.04] & [0.04] & [0.04] & [0.03] & [0.04] & [0.04] \\
+
+L4.log(gdp) & -0.09 & -0.09 & -0.09 & -0.09 & -0.10 & -0.09 \\
+ & (0.03) &  &  & (0.03) &  &  \\
+ & [0.03] & [0.03] & [0.03] & [0.03] & [0.03] & [0.03] \\
+
+\midrule
+Long-run (democracy) ($\times 100$) & 47.78 & 43.76 & 52.54 & 24.75 & 27.90 & 26.43 \\
+ & (20.65) &  &  & (23.36) &  &  \\
+ & [19.08] & [20.81] & [19.21] & [21.32] & [27.42] & [26.75] \\
 \bottomrule
 \end{tabular}
+\vspace{0.3em}
+\begin{minipage}{0.98\linewidth}
+\footnotesize
+Note 1: All specifications include time effects.\\
+Note 2: Clustered standard errors at the country level in parentheses.\\
+Note 3: Bootstrap standard errors in brackets based on 500 replications.
+\end{minipage}
 \end{table}
-
-% Notes: Coefficients and long-run effects are in percentage points; CSE and BSE denote clustered and bootstrap standard errors, respectively.
