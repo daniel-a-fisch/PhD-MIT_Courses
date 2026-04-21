@@ -1,7 +1,7 @@
 """Double ML illustration for the Penn reemployment experiment.
 
-This script mirrors the structure of the 401(k) empirical analysis and applies
-cross-fitted PLR and IRM estimators to treatment group 4 vs control in the
+This script mirrors the PLM empirical analysis and applies cross-fitted PLR
+and extends it also to IRM estimators to treatment group 4 vs control in the
 Pennsylvania reemployment bonus RCT.
 """
 
